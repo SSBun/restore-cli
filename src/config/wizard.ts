@@ -181,5 +181,5 @@ export async function runWizard(): Promise<void> {
   }
 
   writeConfig(config)
-  p.outro('Setup complete! Run `restore backup` to start backing up.')
+  p.outro('Setup complete! Run `restore-cli backup` to start backing up.')
 }

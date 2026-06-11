@@ -10,14 +10,18 @@ export interface FileDiff {
 export async function collectFiles(dir: string): Promise<string[]> {
   const files: string[] = []
   async function walk(current: string) {
-    const entries = await readdir(current, { withFileTypes: true })
-    for (const entry of entries) {
-      const full = resolve(current, entry.name)
-      if (entry.isDirectory()) {
-        if (!entry.name.startsWith('.')) await walk(full)
-      } else {
-        files.push(full)
+    try {
+      const entries = await readdir(current, { withFileTypes: true })
+      for (const entry of entries) {
+        const full = resolve(current, entry.name)
+        if (entry.isDirectory()) {
+          if (!entry.name.startsWith('.')) await walk(full)
+        } else {
+          files.push(full)
+        }
       }
+    } catch {
+      // skip inaccessible or deleted directories
     }
   }
   await walk(dir)
@@ -36,12 +40,17 @@ export async function diffWithLastSnapshot(
   // Gather all source file paths
   const sourceFiles: string[] = []
   for (const src of sources) {
-    const s = await stat(src)
-    if (s.isDirectory()) {
-      const children = await collectFiles(src)
-      sourceFiles.push(...children)
-    } else {
-      sourceFiles.push(src)
+    try {
+      const s = await stat(src)
+      if (s.isDirectory()) {
+        const children = await collectFiles(src)
+        sourceFiles.push(...children)
+      } else {
+        sourceFiles.push(src)
+      }
+    } catch {
+      // skip paths that don't exist (e.g. plugin paths for software not installed)
+      continue
     }
   }
 
