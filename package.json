@@ -4,7 +4,7 @@
   "description": "CLI tool to back up important files to iCloud or other destinations",
   "type": "module",
   "bin": {
-    "restore": "./dist/index.js"
+    "restore-cli": "./dist/index.js"
   },
   "files": [
     "dist/",
