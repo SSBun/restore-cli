@@ -18,7 +18,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-
 const program = new Command()
 
 program
-  .name('restore')
+  .name('restore-cli')
   .description('Backup important files to cloud/local destinations')
   .version(pkg.version)
   .option('--verbose', 'enable debug output')

@@ -49,13 +49,13 @@ pnpm format
 
 | Command | Description |
 |---|---|
-| `restore config` | Interactive wizard — first-run auto-launches if no config |
-| `restore backup [--dry-run]` | Run backup to the configured destination |
-| `restore restore [--snapshot <id>]` | Restore files from a snapshot |
-| `restore daemon start` | Start background daemon (interval-based auto backup) |
-| `restore daemon stop` | Stop background daemon |
-| `restore plugin list` | Show installed plugins |
-| `restore plugin add <name>` | Install a plugin from the curated list |
+| `restore-cli config` | Interactive wizard — first-run auto-launches if no config |
+| `restore-cli backup [--dry-run]` | Run backup to the configured destination |
+| `restore-cli restore [--snapshot <id>]` | Restore files from a snapshot |
+| `restore-cli daemon start` | Start background daemon (interval-based auto backup) |
+| `restore-cli daemon stop` | Stop background daemon |
+| `restore-cli plugin list` | Show installed plugins |
+| `restore-cli plugin add <name>` | Install a plugin from the curated list |
 
 ## Design Decisions (confirmed)
 
