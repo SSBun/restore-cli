@@ -63,11 +63,12 @@ export function registerBackupCommand(program: Command): void {
       )
 
       if (options.dryRun) {
+        const padLen = Math.max(...pluginSources.map((p) => p.name.length)) + 2
         for (const pg of pluginSources) {
           const existResults = await Promise.all(pg.paths.map(fileExists))
           const fileCount = existResults.filter(Boolean).length
           console.log(
-            `  ${color.bold(pg.name)} ${color.dim(`(${pg.description})`)} — ${fileCount} file(s)`,
+            `  ${color.bold(pg.name.padEnd(padLen))}${color.dim(`(${pg.description})`)} — ${fileCount} file(s)`,
           )
           for (let i = 0; i < pg.paths.length; i++) {
             const icon = existResults[i] ? color.icon.ok : color.icon.missing
@@ -81,6 +82,7 @@ export function registerBackupCommand(program: Command): void {
       }
 
       // Show per-plugin diff status
+      const padLen = Math.max(...pluginSources.map((p) => p.name.length)) + 2
       for (const pg of pluginSources) {
         const diffs = await diffWithLastSnapshot(pg.paths, latestSnapshot)
         const fileList: string[] = []
@@ -106,7 +108,7 @@ export function registerBackupCommand(program: Command): void {
         const modified = validDiffs.filter((d) => d.type === 'modified').length
         const added = validDiffs.filter((d) => d.type === 'added').length
 
-        let summary = `  ${color.bold(pg.name)}`
+        let summary = `  ${color.bold(pg.name.padEnd(padLen))}`
         const parts: string[] = []
         if (unchanged > 0) parts.push(`${color.green(String(unchanged))} unchanged`)
         if (modified > 0) parts.push(`${color.yellow(String(modified))} updated`)
