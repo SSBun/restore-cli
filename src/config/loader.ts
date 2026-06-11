@@ -46,13 +46,11 @@ export function writeConfig(config: Config): void {
 
 export function getDefaultConfig(): Config {
   return ConfigSchema.parse({
-    profiles: [
-      {
-        name: 'icloud',
-        path: resolve(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/restore'),
-        type: 'icloud',
-      },
-    ],
+    destination: {
+      name: 'icloud',
+      path: resolve(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/restore'),
+      type: 'icloud',
+    },
     plugins: [],
   })
 }

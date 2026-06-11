@@ -50,7 +50,7 @@ pnpm format
 | Command | Description |
 |---|---|
 | `restore config` | Interactive wizard — first-run auto-launches if no config |
-| `restore backup [--profile <name>]` | Run backup once to specified profile |
+| `restore backup [--dry-run]` | Run backup to the configured destination |
 | `restore restore [--snapshot <id>]` | Restore files from a snapshot |
 | `restore daemon start` | Start background daemon (interval-based auto backup) |
 | `restore daemon stop` | Stop background daemon |
@@ -61,10 +61,10 @@ pnpm format
 
 - **Source system:** Plugin-based — each plugin is a JSON file (`name`, `description`, `paths`) describing what to back up. Users don't manually type paths.
 - **Plugin management:** Built-in curated list. `restore plugin add <name>` installs from it. Plugins live in `~/.config/restore/plugins/`.
-- **Destinations:** Multiple named profiles, each with `path` + `type` hint (icloud/local/smb).
+- **Destination:** Single global backup destination (name + path + type). All plugins share one destination.
 - **Versioning:** Snapshot directories with hardlinks for unchanged files (Time Machine style). Max 14 snapshots (configurable), auto-prune oldest.
-- **Auto backup:** Background daemon (`restore daemon start`), runs every 12 hours by default (configurable per profile). Daemonizes to background.
-- **Config format:** JSON5 (`~/.config/restore/config.json5`). Supports comments.
+- **Auto backup:** Background daemon (`restore daemon start`), runs every 12 hours by default. Daemonizes to background.
+- **Config format:** JSON5 (`~/.config/restore/config.json5`).
 - **Encryption:** None. Files stored as-is.
 - **First run:** Auto-launches config wizard when no config found.
 
@@ -72,18 +72,16 @@ pnpm format
 
 ```
 ~/.config/restore/
-├── config.json5            # Global config (destinations, intervals, daemon settings)
+├── config.json5            # Global config (destination, plugins, daemon settings)
 └── plugins/                # Plugin JSON files describing what to back up
     ├── vscode.json
     └── projects.json
 
 ~/Library/Mobile Documents/com~apple~CloudDocs/
 └── restore/                # Default backup root
-    ├── <profile-name>/     # Named destination profile
-    │   ├── 2026-06-11T14.30.00/   # Snapshot dir (hardlinks for unchanged)
-    │   ├── 2026-06-12T02.00.00/
-    │   └── ...             # Max 14 snapshots, auto-prune oldest
-    └── ...
+    ├── 2026-06-11T14.30.00/   # Snapshot dir (hardlinks for unchanged)
+    ├── 2026-06-12T02.00.00/
+    └── ...                 # Max 14 snapshots, auto-prune oldest
 ```
 
 ```

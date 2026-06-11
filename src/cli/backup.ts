@@ -9,8 +9,7 @@ import { error, info } from '../util/log.js'
 export function registerBackupCommand(program: Command): void {
   program
     .command('backup')
-    .description('Run backup for all configured profiles')
-    .option('--profile <name>', 'Only back up to a specific profile')
+    .description('Run backup to the configured destination')
     .option('--dry-run', 'Show what would be backed up without copying')
     .action(async (options) => {
       const config = loadConfig()
@@ -30,36 +29,24 @@ export function registerBackupCommand(program: Command): void {
         process.exit(1)
       }
 
-      // Filter profiles
-      let profiles = config.profiles
-      if (options.profile) {
-        profiles = profiles.filter((p: { name: string }) => p.name === options.profile)
-        if (profiles.length === 0) {
-          error(`Profile "${options.profile}" not found`)
-          process.exit(1)
+      const destDir = resolve(
+        config.destination.path.startsWith('~/')
+          ? resolve(process.env.HOME || '/tmp', config.destination.path.slice(2))
+          : config.destination.path,
+      )
+
+      info(`Backing up to ${config.destination.name} (${destDir})`)
+
+      if (options.dryRun) {
+        info(`[dry-run] Would create snapshot at ${destDir}`)
+        for (const src of sources) {
+          info(`  - ${src}`)
         }
+        return
       }
 
-      for (const profile of profiles) {
-        const destDir = resolve(
-          profile.path.startsWith('~/')
-            ? resolve(process.env.HOME || '/tmp', profile.path.slice(2))
-            : profile.path,
-        )
-
-        info(`Backing up to ${profile.name} (${destDir})`)
-
-        if (options.dryRun) {
-          info(`[dry-run] Would create snapshot at ${destDir}`)
-          for (const src of sources) {
-            info(`  - ${src}`)
-          }
-          continue
-        }
-
-        const snapshotName = await createSnapshot(sources, destDir)
-        await pruneSnapshots(destDir, config.maxSnapshots)
-        info(`Backup complete: ${profile.name}/${snapshotName}`)
-      }
+      const snapshotName = await createSnapshot(sources, destDir)
+      await pruneSnapshots(destDir, config.maxSnapshots)
+      info(`Backup complete: ${config.destination.name}/${snapshotName}`)
     })
 }
