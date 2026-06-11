@@ -116,7 +116,29 @@ export async function runWizard(): Promise<void> {
     path = typed
   }
 
-  // Step 5: Select plugins
+  // Step 5: Auto-backup interval (global)
+  const daemonInterval = await p.text({
+    message: 'Auto-backup interval in hours (0 to disable daemon)',
+    placeholder: '12',
+    validate: (v) => {
+      if (v && (Number.isNaN(Number(v)) || Number(v) < 0)) {
+        return 'Must be a non-negative number'
+      }
+    },
+  })
+
+  // Step 6: Max snapshots
+  const maxSnapshotsInput = await p.text({
+    message: 'Maximum snapshots to keep',
+    placeholder: '14',
+    validate: (v) => {
+      if (v && (Number.isNaN(Number(v)) || Number(v) <= 0)) {
+        return 'Must be a positive number'
+      }
+    },
+  })
+
+  // Step 7: Select plugins
   const availablePlugins = getAvailablePlugins()
   let selectedPlugins: string[] = []
 
@@ -137,28 +159,6 @@ export async function runWizard(): Promise<void> {
       selectedPlugins = pluginResult as string[]
     }
   }
-
-  // Step 6: Auto-backup interval (global)
-  const daemonInterval = await p.text({
-    message: 'Auto-backup interval in hours (0 to disable daemon)',
-    placeholder: '12',
-    validate: (v) => {
-      if (v && (Number.isNaN(Number(v)) || Number(v) < 0)) {
-        return 'Must be a non-negative number'
-      }
-    },
-  })
-
-  // Step 7: Max snapshots
-  const maxSnapshotsInput = await p.text({
-    message: 'Maximum snapshots to keep',
-    placeholder: '14',
-    validate: (v) => {
-      if (v && (Number.isNaN(Number(v)) || Number(v) <= 0)) {
-        return 'Must be a positive number'
-      }
-    },
-  })
 
   // Step 8: Write config
   const config: Config = {
