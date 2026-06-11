@@ -2,9 +2,17 @@ import { resolve } from 'node:path'
 import type { Command } from 'commander'
 import { loadConfig } from '../config/loader.js'
 import { pruneSnapshots } from '../engine/prune.js'
-import { createSnapshot } from '../engine/snapshot.js'
+import { createSnapshot, ensureBackupRoot } from '../engine/snapshot.js'
 import { getEnabledPlugins } from '../plugin/loader.js'
 import { error, info } from '../util/log.js'
+
+const BACKUP_DIR_NAME = 'RestoreBackup'
+
+function resolveDestPath(path: string): string {
+  return path.startsWith('~/')
+    ? resolve(process.env.HOME || '/tmp', path.slice(2))
+    : resolve(path)
+}
 
 export function registerBackupCommand(program: Command): void {
   program
@@ -29,24 +37,22 @@ export function registerBackupCommand(program: Command): void {
         process.exit(1)
       }
 
-      const destDir = resolve(
-        config.destination.path.startsWith('~/')
-          ? resolve(process.env.HOME || '/tmp', config.destination.path.slice(2))
-          : config.destination.path,
-      )
+      const destRoot = resolveDestPath(config.destination.path)
+      const backupRoot = resolve(destRoot, BACKUP_DIR_NAME)
 
-      info(`Backing up to ${config.destination.name} (${destDir})`)
+      info(`Backing up to ${config.destination.name} (${backupRoot})`)
 
       if (options.dryRun) {
-        info(`[dry-run] Would create snapshot at ${destDir}`)
+        info(`[dry-run] Would create snapshot at ${backupRoot}`)
         for (const src of sources) {
           info(`  - ${src}`)
         }
         return
       }
 
-      const snapshotName = await createSnapshot(sources, destDir)
-      await pruneSnapshots(destDir, config.maxSnapshots)
+      await ensureBackupRoot(backupRoot)
+      const snapshotName = await createSnapshot(sources, backupRoot)
+      await pruneSnapshots(backupRoot, config.maxSnapshots)
       info(`Backup complete: ${config.destination.name}/${snapshotName}`)
     })
 }

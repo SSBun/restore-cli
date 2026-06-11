@@ -7,6 +7,14 @@ import { getSnapshotInfo, restoreFromSnapshot } from '../engine/restore.js'
 import { getEnabledPlugins } from '../plugin/loader.js'
 import { error, info } from '../util/log.js'
 
+const BACKUP_DIR_NAME = 'RestoreBackup'
+
+function resolveDestPath(path: string): string {
+  return path.startsWith('~/')
+    ? resolve(process.env.HOME || '/tmp', path.slice(2))
+    : resolve(path)
+}
+
 export function registerRestoreCommand(program: Command): void {
   program
     .command('restore')
@@ -15,12 +23,8 @@ export function registerRestoreCommand(program: Command): void {
     .option('--list', 'List available snapshots')
     .action(async (options) => {
       const config = loadConfig()
-
-      const destPath = config.destination.path.startsWith('~/')
-        ? resolve(process.env.HOME || '/tmp', config.destination.path.slice(2))
-        : resolve(config.destination.path)
-
-      const snapshots = await getSnapshotInfo(destPath)
+      const backupRoot = resolve(resolveDestPath(config.destination.path), BACKUP_DIR_NAME)
+      const snapshots = await getSnapshotInfo(backupRoot)
 
       if (options.list) {
         info(`Snapshots for ${config.destination.name}:`)

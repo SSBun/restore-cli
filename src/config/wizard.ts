@@ -1,8 +1,8 @@
-import * as p from '@clack/prompts'
-import { isCancel } from '@clack/prompts'
 import { execSync } from 'node:child_process'
 import { homedir } from 'node:os'
-import { getBuiltinPlugins, getPluginNames } from '../plugin/registry.js'
+import * as p from '@clack/prompts'
+import { isCancel } from '@clack/prompts'
+import { addPlugin, getBuiltinPlugins, getPluginNames } from '../plugin/registry.js'
 import { writeConfig } from './loader.js'
 import type { Config } from './types.js'
 import type { Destination } from './types.js'
@@ -158,6 +158,11 @@ export async function runWizard(): Promise<void> {
     if (!isCancel(pluginResult)) {
       selectedPlugins = pluginResult as string[]
     }
+  }
+
+  // Install selected plugin files
+  for (const name of selectedPlugins) {
+    addPlugin(name)
   }
 
   // Step 8: Write config

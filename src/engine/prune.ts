@@ -2,13 +2,16 @@ import { rm, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { listSubdirs } from '../util/fs.js'
 import { info } from '../util/log.js'
+import { isValidSnapshotName } from './snapshot.js'
 
 /// Returns snapshot directory names under `destDir`, sorted oldest-first by birthtime.
+/// Only directories matching the snapshot timestamp format are included.
 export async function listSnapshots(destDir: string): Promise<string[]> {
   try {
     const dirs = await listSubdirs(destDir)
+    const snapshots = dirs.filter(isValidSnapshotName)
     const withTime = await Promise.all(
-      dirs.map(async (name) => {
+      snapshots.map(async (name) => {
         try {
           const s = await stat(resolve(destDir, name))
           return { name, time: s.birthtimeMs || s.mtimeMs }
@@ -24,6 +27,7 @@ export async function listSnapshots(destDir: string): Promise<string[]> {
 }
 
 /// Removes the oldest snapshots exceeding `maxCount`.
+/// Only directories matching the snapshot timestamp format are pruned.
 export async function pruneSnapshots(destDir: string, maxCount: number): Promise<void> {
   const snapshots = await listSnapshots(destDir)
   if (snapshots.length <= maxCount) return
