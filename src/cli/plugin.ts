@@ -1,4 +1,5 @@
 import * as p from '@clack/prompts'
+import { isCancel } from '@clack/prompts'
 import type { Command } from 'commander'
 import { loadPlugin } from '../plugin/loader.js'
 import {
@@ -9,7 +10,47 @@ import {
 } from '../plugin/registry.js'
 
 export function registerPluginCommand(program: Command): void {
-  const pluginCmd = program.command('plugin').description('Manage backup plugins')
+  const pluginCmd = program
+    .command('plugin')
+    .description('Manage backup plugins')
+    .action(async () => {
+      // Interactive mode: multiselect to install/uninstall
+      const builtins = getBuiltinPlugins()
+      const installed = getInstalledPlugins()
+
+      const result = await p.multiselect<{ value: string; label: string; hint?: string }[], string>(
+        {
+          message: 'Select plugins to install (space to toggle, enter to confirm):',
+          options: builtins.map((pl) => ({
+            value: pl.name,
+            label: pl.name,
+            hint: pl.description,
+          })),
+          required: false,
+          initialValues: installed,
+        },
+      )
+
+      if (isCancel(result)) {
+        p.cancel('Cancelled')
+        return
+      }
+
+      const selected = result as string[]
+      for (const name of selected) {
+        if (!installed.includes(name)) {
+          addPlugin(name)
+          p.log.success(`Installed: ${name}`)
+        }
+      }
+      for (const name of installed) {
+        if (!selected.includes(name)) {
+          p.log.warn(`Skipped uninstalling: ${name} (not yet supported)`)
+        }
+      }
+
+      p.outro(`${selected.length}/${builtins.length} plugins installed`)
+    })
 
   pluginCmd
     .command('list')

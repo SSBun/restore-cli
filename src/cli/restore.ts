@@ -10,9 +10,7 @@ import { error, info } from '../util/log.js'
 const BACKUP_DIR_NAME = 'RestoreBackup'
 
 function resolveDestPath(path: string): string {
-  return path.startsWith('~/')
-    ? resolve(process.env.HOME || '/tmp', path.slice(2))
-    : resolve(path)
+  return path.startsWith('~/') ? resolve(process.env.HOME || '/tmp', path.slice(2)) : resolve(path)
 }
 
 export function registerRestoreCommand(program: Command): void {
