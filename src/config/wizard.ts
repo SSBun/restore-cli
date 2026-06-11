@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process'
+import { homedir } from 'node:os'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
 import { getBuiltinPlugins, getPluginNames } from '../plugin/registry.js'
@@ -22,61 +24,121 @@ function getAvailablePlugins(): PluginInfo[] {
   }
 }
 
+function browseFolder(): string | null {
+  try {
+    const result = execSync(
+      'osascript -e \'POSIX path of (choose folder with prompt "Select backup destination")\'',
+      { encoding: 'utf-8', timeout: 30000 },
+    )
+    return result.trim().replace(/\n$/, '')
+  } catch {
+    return null
+  }
+}
+
+function getDefaultPath(type: string): string {
+  switch (type) {
+    case 'icloud':
+      return `${homedir()}/Library/Mobile Documents/com~apple~CloudDocs/restore`
+    case 'local':
+      return `${homedir()}/Desktop/backup`
+    case 'smb':
+      return '/Volumes/backup'
+    default:
+      return `${homedir()}/restore-backup`
+  }
+}
+
 export async function runWizard(): Promise<void> {
   p.intro('restore setup')
 
-  // Step 1: Add backup profiles
   const profiles: Profile[] = []
   let addMore = true
 
   while (addMore) {
-    const profileGroup = await p.group(
-      {
-        name: () =>
-          p.text({
-            message: 'Profile name',
-            placeholder: 'e.g. icloud, external',
-            validate: (v) => (v.length === 0 ? 'Name is required' : undefined),
-          }),
-        path: () =>
-          p.text({
-            message: 'Backup destination path',
-            placeholder: 'e.g. ~/Library/Mobile Documents/com~apple~CloudDocs/restore',
-            validate: (v) => (v.length === 0 ? 'Path is required' : undefined),
-          }),
-        type: () =>
-          p.select<{ value: string; label: string; hint?: string }[], string>({
-            message: 'Destination type',
-            options: [
-              { value: 'icloud', label: 'iCloud Drive' },
-              { value: 'local', label: 'Local folder' },
-              { value: 'smb', label: 'Network/SMB' },
-            ],
-          }),
-        interval: () =>
-          p.text({
-            message: 'Backup interval in hours (optional, for daemon mode)',
-            placeholder: '12',
-            validate: (v) => {
-              if (v && (Number.isNaN(Number(v)) || Number(v) <= 0)) {
-                return 'Must be a positive number'
-              }
-            },
-          }),
+    // 1a. Choose backup type
+    const backupType = await p.select<{ value: string; label: string; hint?: string }[], string>({
+      message: 'What type of backup destination?',
+      options: [
+        { value: 'icloud', label: 'iCloud Drive', hint: 'Files sync across Apple devices' },
+        { value: 'local', label: 'Local folder', hint: 'External drive or internal disk' },
+        { value: 'smb', label: 'Network / SMB', hint: 'NAS or shared network drive' },
+      ],
+    })
+    if (isCancel(backupType)) {
+      p.cancel('Setup cancelled')
+      process.exit(0)
+    }
+
+    // 1b. Input profile name
+    const name = await p.text({
+      message: 'Name this backup destination',
+      placeholder: 'e.g. icloud, nas, external-ssd',
+      validate: (v) => (v.length === 0 ? 'Name is required' : undefined),
+    })
+    if (isCancel(name)) {
+      p.cancel('Setup cancelled')
+      process.exit(0)
+    }
+
+    // 1c. Choose how to provide the path
+    const pathMethod = await p.select<{ value: string; label: string; hint?: string }[], string>({
+      message: 'How to set the folder path?',
+      options: [
+        { value: 'type', label: 'Type path manually' },
+        { value: 'browse', label: 'Browse folder…', hint: 'Open system folder picker' },
+      ],
+    })
+    if (isCancel(pathMethod)) {
+      p.cancel('Setup cancelled')
+      process.exit(0)
+    }
+
+    // 1d. Get the folder path
+    let path: string
+    if (pathMethod === 'browse') {
+      const s = p.spinner()
+      s.start('Opening folder picker…')
+      const selected = browseFolder()
+      s.stop(selected ? 'Folder selected' : 'Picker cancelled')
+      if (!selected) {
+        p.cancel('No folder selected')
+        process.exit(0)
+      }
+      path = selected
+    } else {
+      const typed = await p.text({
+        message: 'Enter backup destination path',
+        placeholder: getDefaultPath(backupType),
+        validate: (v) => (v.length === 0 ? 'Path is required' : undefined),
+      })
+      if (isCancel(typed)) {
+        p.cancel('Setup cancelled')
+        process.exit(0)
+      }
+      path = typed
+    }
+
+    // 1e. Optional interval
+    const interval = await p.text({
+      message: 'Backup interval in hours (optional, for daemon mode)',
+      placeholder: '12',
+      validate: (v) => {
+        if (v && (Number.isNaN(Number(v)) || Number(v) <= 0)) {
+          return 'Must be a positive number'
+        }
       },
-      {
-        onCancel: () => {
-          p.cancel('Setup cancelled')
-          process.exit(0)
-        },
-      },
-    )
+    })
+    if (isCancel(interval)) {
+      p.cancel('Setup cancelled')
+      process.exit(0)
+    }
 
     profiles.push({
-      name: profileGroup.name,
-      path: profileGroup.path,
-      type: profileGroup.type as Profile['type'],
-      intervalHours: profileGroup.interval ? Number(profileGroup.interval) : undefined,
+      name,
+      path,
+      type: backupType as Profile['type'],
+      intervalHours: interval ? Number(interval) : undefined,
     })
 
     const addMoreResult = await p.confirm({
