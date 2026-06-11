@@ -48,10 +48,7 @@ export async function diffWithLastSnapshot(
       } else {
         sourceFiles.push(src)
       }
-    } catch {
-      // skip paths that don't exist (e.g. plugin paths for software not installed)
-      continue
-    }
+    } catch {}
   }
 
   if (!snapshotDir) {

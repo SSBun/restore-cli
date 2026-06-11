@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
 import { addPlugin, getBuiltinPlugins, getPluginNames } from '../plugin/registry.js'
-import { writeConfig } from './loader.js'
+import { configExists, loadConfig, writeConfig } from './loader.js'
 import type { Config } from './types.js'
 import type { Destination } from './types.js'
 
@@ -25,12 +25,15 @@ function getAvailablePlugins(): PluginInfo[] {
   }
 }
 
-function browseFolder(): string | null {
+function browseFolder(promptMsg?: string): string | null {
   try {
-    const result = execSync(
-      'osascript -e \'POSIX path of (choose folder with prompt "Select backup destination")\'',
-      { encoding: 'utf-8', timeout: 30000 },
-    )
+    const script = promptMsg
+      ? `POSIX path of (choose folder with prompt "${promptMsg}")`
+      : 'POSIX path of (choose folder)'
+    const result = execSync(`osascript -e '${script}'`, {
+      encoding: 'utf-8',
+      timeout: 30000,
+    })
     return result.trim().replace(/\n$/, '')
   } catch {
     return null
@@ -50,35 +53,29 @@ function getDefaultPath(type: string): string {
   }
 }
 
-export async function runWizard(): Promise<void> {
-  p.intro('restore setup')
-
-  // Step 1: Choose backup type
+async function askDestination(initial?: Destination): Promise<Destination> {
+  // Type
   const backupType = await p.select<{ value: string; label: string; hint?: string }[], string>({
     message: 'What type of backup destination?',
+    initialValue: initial?.type,
     options: [
       { value: 'icloud', label: 'iCloud Drive', hint: 'Files sync across Apple devices' },
       { value: 'local', label: 'Local folder', hint: 'External drive or internal disk' },
       { value: 'smb', label: 'Network / SMB', hint: 'NAS or shared network drive' },
     ],
   })
-  if (isCancel(backupType)) {
-    p.cancel('Setup cancelled')
-    process.exit(0)
-  }
+  if (isCancel(backupType)) process.exit(0)
 
-  // Step 2: Name this destination
+  // Name
   const name = await p.text({
     message: 'Name this backup destination',
     placeholder: 'e.g. icloud, nas, external-ssd',
+    initialValue: initial?.name,
     validate: (v) => (v.length === 0 ? 'Name is required' : undefined),
   })
-  if (isCancel(name)) {
-    p.cancel('Setup cancelled')
-    process.exit(0)
-  }
+  if (isCancel(name)) process.exit(0)
 
-  // Step 3: Choose path input method
+  // Path input method
   const pathMethod = await p.select<{ value: string; label: string; hint?: string }[], string>({
     message: 'How to set the folder path?',
     options: [
@@ -86,17 +83,14 @@ export async function runWizard(): Promise<void> {
       { value: 'browse', label: 'Browse folder…', hint: 'Open system folder picker' },
     ],
   })
-  if (isCancel(pathMethod)) {
-    p.cancel('Setup cancelled')
-    process.exit(0)
-  }
+  if (isCancel(pathMethod)) process.exit(0)
 
-  // Step 4: Get the folder path
+  // Path
   let path: string
   if (pathMethod === 'browse') {
     const s = p.spinner()
     s.start('Opening folder picker…')
-    const selected = browseFolder()
+    const selected = browseFolder('Select backup destination')
     s.stop(selected ? 'Folder selected' : 'Picker cancelled')
     if (!selected) {
       p.cancel('No folder selected')
@@ -107,79 +101,140 @@ export async function runWizard(): Promise<void> {
     const typed = await p.text({
       message: 'Enter backup destination path',
       placeholder: getDefaultPath(backupType),
+      initialValue: initial?.path,
       validate: (v) => (v.length === 0 ? 'Path is required' : undefined),
     })
-    if (isCancel(typed)) {
-      p.cancel('Setup cancelled')
-      process.exit(0)
-    }
+    if (isCancel(typed)) process.exit(0)
     path = typed
   }
 
-  // Step 5: Auto-backup interval (global)
+  return { name, path, type: backupType as Destination['type'] }
+}
+
+async function askBackupSettings(initial?: { interval: number; maxSnapshots: number }) {
   const daemonInterval = await p.text({
     message: 'Auto-backup interval in hours (0 to disable daemon)',
     placeholder: '12',
+    initialValue: initial ? String(initial.interval) : undefined,
     validate: (v) => {
-      if (v && (Number.isNaN(Number(v)) || Number(v) < 0)) {
-        return 'Must be a non-negative number'
-      }
+      if (v && (Number.isNaN(Number(v)) || Number(v) < 0)) return 'Must be a non-negative number'
     },
   })
 
-  // Step 6: Max snapshots
   const maxSnapshotsInput = await p.text({
     message: 'Maximum snapshots to keep',
     placeholder: '14',
+    initialValue: initial ? String(initial.maxSnapshots) : undefined,
     validate: (v) => {
-      if (v && (Number.isNaN(Number(v)) || Number(v) <= 0)) {
-        return 'Must be a positive number'
-      }
+      if (v && (Number.isNaN(Number(v)) || Number(v) <= 0)) return 'Must be a positive number'
     },
   })
 
-  // Step 7: Select plugins
-  const availablePlugins = getAvailablePlugins()
-  let selectedPlugins: string[] = []
-
-  if (availablePlugins.length > 0) {
-    const pluginResult = await p.multiselect<
-      { value: string; label: string; hint?: string }[],
-      string
-    >({
-      message: 'Select plugins (what to back up):',
-      options: availablePlugins.map((pl) => ({
-        value: pl.name,
-        label: pl.name,
-        hint: pl.description,
-      })),
-      required: false,
-    })
-    if (!isCancel(pluginResult)) {
-      selectedPlugins = pluginResult as string[]
-    }
-  }
-
-  // Install selected plugin files
-  for (const name of selectedPlugins) {
-    addPlugin(name)
-  }
-
-  // Step 8: Write config
-  const config: Config = {
-    destination: {
-      name,
-      path,
-      type: backupType as Destination['type'],
-    },
-    plugins: selectedPlugins,
-    daemon: {
-      intervalHours: daemonInterval && !isCancel(daemonInterval) ? Number(daemonInterval) : 12,
-    },
+  return {
+    interval: daemonInterval && !isCancel(daemonInterval) ? Number(daemonInterval) : 12,
     maxSnapshots:
       maxSnapshotsInput && !isCancel(maxSnapshotsInput) ? Number(maxSnapshotsInput) : 14,
   }
+}
 
-  writeConfig(config)
-  p.outro('Setup complete! Run `restore-cli backup` to start backing up.')
+async function askPlugins(initial?: string[]): Promise<string[]> {
+  const available = getAvailablePlugins()
+  if (available.length === 0) return []
+
+  const result = await p.multiselect<{ value: string; label: string; hint?: string }[], string>({
+    message: 'Select plugins (what to back up):',
+    options: available.map((pl) => ({
+      value: pl.name,
+      label: pl.name,
+      hint: pl.description,
+    })),
+    required: false,
+    initialValues: initial,
+  })
+
+  if (isCancel(result)) process.exit(0)
+  const selected = result as string[]
+
+  for (const name of selected) addPlugin(name)
+  return selected
+}
+
+export async function runWizard(): Promise<void> {
+  p.intro('restore setup')
+
+  if (!configExists()) {
+    // First-time setup — full creation flow
+    const destination = await askDestination()
+    const settings = await askBackupSettings()
+    const plugins = await askPlugins()
+
+    writeConfig({
+      destination,
+      plugins,
+      daemon: { intervalHours: settings.interval },
+      maxSnapshots: settings.maxSnapshots,
+    })
+
+    p.outro('Setup complete! Run `restore-cli backup` to start backing up.')
+    return
+  }
+
+  // Config exists — show management menu
+  const config = loadConfig()
+
+  const action = await p.select<{ value: string; label: string; hint?: string }[], string>({
+    message: 'Backup configuration:',
+    options: [
+      {
+        value: 'edit-destination',
+        label: 'Edit destination',
+        hint: `${config.destination.name} (${config.destination.path})`,
+      },
+      {
+        value: 'edit-settings',
+        label: 'Change backup settings',
+        hint: `interval ${config.daemon.intervalHours}h, ${config.maxSnapshots} snapshots`,
+      },
+      {
+        value: 'edit-plugins',
+        label: 'Change plugins',
+        hint: `${config.plugins.length} plugin(s) selected`,
+      },
+      { value: 'full-reset', label: 'Full re-setup', hint: 'Overwrite all settings' },
+    ],
+  })
+  if (isCancel(action)) {
+    p.cancel('Cancelled')
+    process.exit(0)
+  }
+
+  let destination = config.destination
+  let settings = { interval: config.daemon.intervalHours, maxSnapshots: config.maxSnapshots }
+  let plugins = config.plugins
+
+  switch (action) {
+    case 'edit-destination':
+      destination = await askDestination(config.destination)
+      break
+    case 'edit-settings':
+      settings = await askBackupSettings(settings)
+      break
+    case 'edit-plugins':
+      plugins = await askPlugins(config.plugins)
+      break
+    case 'full-reset':
+      destination = await askDestination()
+      settings = await askBackupSettings()
+      plugins = await askPlugins()
+      break
+  }
+
+  writeConfig({
+    destination,
+    plugins,
+    daemon: { intervalHours: settings.interval },
+    maxSnapshots: settings.maxSnapshots,
+  })
+
+  p.outro('Configuration updated!')
 }
