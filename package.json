@@ -22,7 +22,7 @@
     "url": "git+https://github.com/ssbun/restore-cli.git"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -R src/plugin/scripts dist/plugin/scripts",
     "dev": "tsc --watch",
     "start": "tsx src/index.ts",
     "test": "vitest run",

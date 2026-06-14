@@ -10,6 +10,10 @@ function getTimestamp(): string {
   return new Date().toISOString().replace(/:/g, '-').replace('Z', '')
 }
 
+export function snapshotTimestamp(): string {
+  return getTimestamp()
+}
+
 export function isValidSnapshotName(name: string): boolean {
   return SNAPSHOT_REGEX.test(name)
 }
@@ -34,6 +38,38 @@ export async function ensureBackupRoot(backupRoot: string): Promise<void> {
   await writeFile(markerPath, 'restore-backup-directory\n', 'utf-8')
 }
 
+/// Apply file diffs into an open snapshot directory.
+export async function applyDiffsToSnapshot(
+  snapshotPath: string,
+  diffs: Awaited<ReturnType<typeof diffWithLastSnapshot>>,
+  latestSnapshot: string | null,
+): Promise<{ linked: number; copied: number }> {
+  let copied = 0
+  let linked = 0
+
+  for (const diff of diffs) {
+    const relPath = diff.path.startsWith('/') ? diff.path.slice(1) : diff.path
+    const destFile = resolve(snapshotPath, relPath)
+
+    if (diff.type === 'unchanged' && latestSnapshot) {
+      const srcInLatest = resolve(latestSnapshot, relPath)
+      await ensureDir(resolve(destFile, '..'))
+      await hardlinkCopy(srcInLatest, destFile)
+      linked++
+      debug(`link: ${relPath}`)
+    } else {
+      await ensureDir(resolve(destFile, '..'))
+      await copyWithChecksum(diff.path, destFile)
+      const srcStat = await stat(diff.path)
+      await utimes(destFile, srcStat.atime, srcStat.mtime)
+      copied++
+      debug(`copy: ${relPath}`)
+    }
+  }
+
+  return { linked, copied }
+}
+
 /// Creates a new snapshot under `destDir` by diffing `sources` against the latest snapshot.
 ///
 /// Unchanged files are hardlinked from the previous snapshot (Time Machine style);
@@ -48,30 +84,7 @@ export async function createSnapshot(sources: string[], destDir: string): Promis
 
   await ensureDir(snapshotPath)
 
-  let copied = 0
-  let linked = 0
-
-  for (const diff of diffs) {
-    const relPath = diff.path.startsWith('/') ? diff.path.slice(1) : diff.path
-    const destFile = resolve(snapshotPath, relPath)
-
-    if (diff.type === 'unchanged' && latestSnapshot) {
-      // Hardlink from the latest snapshot
-      const srcInLatest = resolve(latestSnapshot, relPath)
-      await ensureDir(resolve(destFile, '..'))
-      await hardlinkCopy(srcInLatest, destFile)
-      linked++
-      debug(`link: ${relPath}`)
-    } else {
-      // Copy (new or modified) — preserve source mtime so next diff detects as unchanged
-      await ensureDir(resolve(destFile, '..'))
-      await copyWithChecksum(diff.path, destFile)
-      const srcStat = await stat(diff.path)
-      await utimes(destFile, srcStat.atime, srcStat.mtime)
-      copied++
-      debug(`copy: ${relPath}`)
-    }
-  }
+  const { linked, copied } = await applyDiffsToSnapshot(snapshotPath, diffs, latestSnapshot)
 
   info(`Snapshot ${timestamp}: ${linked} linked, ${copied} copied`)
   return timestamp

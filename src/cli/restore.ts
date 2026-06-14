@@ -1,4 +1,3 @@
-import { resolve } from 'node:path'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
 import type { Command } from 'commander'
@@ -6,12 +5,7 @@ import { loadConfig } from '../config/loader.js'
 import { getSnapshotInfo, restoreFromSnapshot } from '../engine/restore.js'
 import { getEnabledPlugins } from '../plugin/loader.js'
 import { error, info } from '../util/log.js'
-
-const BACKUP_DIR_NAME = 'RestoreBackup'
-
-function resolveDestPath(path: string): string {
-  return path.startsWith('~/') ? resolve(process.env.HOME || '/tmp', path.slice(2)) : resolve(path)
-}
+import { getBackupRoot } from '../util/path.js'
 
 export function registerRestoreCommand(program: Command): void {
   program
@@ -21,7 +15,7 @@ export function registerRestoreCommand(program: Command): void {
     .option('--list', 'List available snapshots')
     .action(async (options) => {
       const config = loadConfig()
-      const backupRoot = resolve(resolveDestPath(config.destination.path), BACKUP_DIR_NAME)
+      const backupRoot = getBackupRoot(config.destination.path)
       const snapshots = await getSnapshotInfo(backupRoot)
 
       if (options.list) {
@@ -71,7 +65,7 @@ export function registerRestoreCommand(program: Command): void {
       }
 
       const plugins = getEnabledPlugins(config.plugins)
-      const restoreRoots = plugins.flatMap((p) => p.paths)
+      const restoreRoots = plugins.flatMap((plugin) => plugin.paths)
 
       const { restored } = await restoreFromSnapshot(snapshot.path, restoreRoots)
       info(`Restored ${restored} files from ${snapshotName}`)

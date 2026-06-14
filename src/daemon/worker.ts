@@ -1,6 +1,9 @@
-import { unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { loadConfig } from '../config/loader.js'
+import { executeBackup } from '../engine/run-backup.js'
+import { error, info } from '../util/log.js'
 
 const PID_PATH = resolve(homedir(), '.config', 'restore', 'restore.pid')
 
@@ -10,9 +13,12 @@ const intervalMs = Number(process.env.RESTORE_INTERVAL) || 12 * 60 * 60 * 1000
 
 async function tick(): Promise<void> {
   try {
-    process.stdout.write(`[${new Date().toISOString()}] Daemon tick\n`)
+    info(`Daemon backup starting (${new Date().toISOString()})`)
+    const config = loadConfig()
+    const { snapshotName } = await executeBackup(config)
+    info(`Daemon backup complete: ${snapshotName}`)
   } catch (err) {
-    process.stderr.write(`Daemon error: ${(err as Error).message}\n`)
+    error(`Daemon backup failed: ${(err as Error).message}`)
   }
 }
 

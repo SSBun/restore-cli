@@ -28,7 +28,7 @@ export async function collectFiles(dir: string): Promise<string[]> {
   return files
 }
 
-/// Compare source files vs the latest snapshot.
+/// Compare source files vs the latest snapshot using size + mtime (fast path).
 ///
 /// - Parameter sources: List of source file or directory paths to back up.
 /// - Parameter snapshotDir: Path to the latest snapshot directory, or `null` if none exists.
@@ -63,8 +63,8 @@ export async function diffWithLastSnapshot(
       const snapStat = await stat(snapshotPath)
       const srcStat = await stat(file)
       if (
-        Math.round(srcStat.mtimeMs) !== Math.round(snapStat.mtimeMs) ||
-        srcStat.size !== snapStat.size
+        srcStat.size !== snapStat.size ||
+        Math.round(srcStat.mtimeMs) !== Math.round(snapStat.mtimeMs)
       ) {
         result.push({ path: file, type: 'modified' })
       } else {

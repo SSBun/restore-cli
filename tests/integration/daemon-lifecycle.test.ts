@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 describe('daemon lifecycle patterns', () => {
   let tmpDir: string

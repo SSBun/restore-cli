@@ -56,6 +56,19 @@ describe('backup-restore integration', () => {
     expect(restored).toBeGreaterThan(0)
   })
 
+  it('should restore when roots use tilde paths', async () => {
+    const { homedir } = await import('node:os')
+    const home = homedir()
+    if (!sourceDir.startsWith(home)) return
+
+    const { getSnapshotInfo } = await import('../../src/engine/restore.js')
+    const snapshots = await getSnapshotInfo(destDir)
+    const tildeRoot = `~${sourceDir.slice(home.length)}`
+
+    const { restored } = await restoreFromSnapshot(snapshots[0].path, [tildeRoot])
+    expect(restored).toBeGreaterThan(0)
+  })
+
   it('should prune old snapshots', async () => {
     // Create extra snapshots by creating more copies
     for (let i = 0; i < 5; i++) {

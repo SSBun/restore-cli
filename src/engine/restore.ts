@@ -2,6 +2,7 @@ import { statSync } from 'node:fs'
 import { copyFile, mkdir, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { listSubdirs } from '../util/fs.js'
+import { isUnderRoot } from '../util/path.js'
 
 /// Metadata for a single snapshot.
 export interface SnapshotInfo {
@@ -69,6 +70,7 @@ async function walkFiles(dir: string): Promise<string[]> {
 /// The snapshot stores files using their absolute path minus the leading `/`,
 /// so `snapshotDir/Users/name/file.txt` restores to `/Users/name/file.txt`.
 /// Only files whose paths fall under one of the `restoreRoots` are restored.
+/// Roots may use `~/` prefixes; they are expanded before matching.
 /// - Returns: The number of files successfully restored.
 export async function restoreFromSnapshot(
   snapshotDir: string,
@@ -83,9 +85,8 @@ export async function restoreFromSnapshot(
       ? fullPath.slice(snapshotDir.length + 1)
       : fullPath
 
-    // Only restore files that belong to one of the known source roots
-    const matchedRoot = restoreRoots.find((root) => relativePath.startsWith(root.slice(1)))
-    if (!matchedRoot) continue
+    const matched = restoreRoots.some((root) => isUnderRoot(relativePath, root))
+    if (!matched) continue
 
     const destPath = resolve('/', relativePath)
     await mkdir(resolve(destPath, '..'), { recursive: true })

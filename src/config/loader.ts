@@ -40,8 +40,8 @@ export function loadConfig(): Config {
 
 export function writeConfig(config: Config): void {
   ensureConfigDir()
-  const json = JSON.stringify(config, null, 2)
-  writeFileSync(CONFIG_PATH, json, 'utf-8')
+  const json5 = JSON5.stringify(config, null, 2)
+  writeFileSync(CONFIG_PATH, json5, 'utf-8')
 }
 
 export function getDefaultConfig(): Config {

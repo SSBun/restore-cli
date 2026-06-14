@@ -7,8 +7,8 @@ import { Command } from 'commander'
 import { registerBackupCommand } from './cli/backup.js'
 import { registerConfigCommand } from './cli/config.js'
 import { registerDaemonCommand } from './cli/daemon.js'
-import { registerPluginCommand } from './cli/plugin.js'
 import { registerRestoreCommand } from './cli/restore.js'
+import { registerToolCommand } from './cli/tool.js'
 import { configExists } from './config/loader.js'
 import { runWizard } from './config/wizard.js'
 import { setQuiet, setVerbose } from './util/log.js'
@@ -34,9 +34,9 @@ program.hook('preAction', (thisCommand) => {
 
 // Register subcommands
 registerConfigCommand(program)
-registerPluginCommand(program)
 registerBackupCommand(program)
 registerRestoreCommand(program)
+registerToolCommand(program)
 registerDaemonCommand(program)
 
 // First-run: auto-launch config wizard if no config exists
@@ -44,8 +44,9 @@ const noConfig = !configExists()
 const args = process.argv.slice(2)
 const isHelp = args.includes('--help') || args.includes('-h')
 const isVersion = args.includes('--version') || args.includes('-V')
+const isTool = args[0] === 'tool'
 
-if (noConfig && !isHelp && !isVersion) {
+if (noConfig && !isHelp && !isVersion && !isTool) {
   console.log('No configuration found. Starting setup wizard...\n')
   await runWizard()
 }

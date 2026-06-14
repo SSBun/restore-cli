@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
-import { addPlugin, getBuiltinPlugins, getPluginNames } from '../plugin/registry.js'
+import { getBuiltinPlugins } from '../plugin/registry.js'
 import { configExists, loadConfig, writeConfig } from './loader.js'
 import type { Destination } from './types.js'
 
@@ -12,16 +12,10 @@ interface PluginInfo {
 }
 
 function getAvailablePlugins(): PluginInfo[] {
-  try {
-    const names = getPluginNames()
-    const builtins = getBuiltinPlugins()
-    return names.map((name) => ({
-      name,
-      description: builtins.find((b) => b.name === name)?.description,
-    }))
-  } catch {
-    return []
-  }
+  return getBuiltinPlugins().map((plugin) => ({
+    name: plugin.name,
+    description: plugin.description,
+  }))
 }
 
 function browseFolder(promptMsg?: string): string | null {
@@ -145,7 +139,6 @@ async function askPlugins(initial?: string[]): Promise<string[] | null> {
   if (isCancel(result)) return null
 
   const selected = result as string[]
-  for (const name of selected) addPlugin(name)
   return selected
 }
 

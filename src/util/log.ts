@@ -1,6 +1,10 @@
 let verbose = false
 let quiet = false
 
+export function isQuiet(): boolean {
+  return quiet
+}
+
 export function info(msg: string): void {
   if (!quiet) console.log(msg)
 }

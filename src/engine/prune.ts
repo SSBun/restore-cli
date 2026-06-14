@@ -1,7 +1,7 @@
 import { rm, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { listSubdirs } from '../util/fs.js'
-import { info } from '../util/log.js'
+import { debug } from '../util/log.js'
 import { isValidSnapshotName } from './snapshot.js'
 
 /// Returns snapshot directory names under `destDir`, sorted oldest-first by birthtime.
@@ -27,15 +27,16 @@ export async function listSnapshots(destDir: string): Promise<string[]> {
 }
 
 /// Removes the oldest snapshots exceeding `maxCount`.
-/// Only directories matching the snapshot timestamp format are pruned.
-export async function pruneSnapshots(destDir: string, maxCount: number): Promise<void> {
+/// Returns the number of snapshots removed.
+export async function pruneSnapshots(destDir: string, maxCount: number): Promise<number> {
   const snapshots = await listSnapshots(destDir)
-  if (snapshots.length <= maxCount) return
+  if (snapshots.length <= maxCount) return 0
 
   const toRemove = snapshots.slice(0, snapshots.length - maxCount)
   for (const name of toRemove) {
     const fullPath = resolve(destDir, name)
     await rm(fullPath, { recursive: true, force: true })
-    info(`Pruned old snapshot: ${name}`)
+    debug(`Pruned old snapshot: ${name}`)
   }
+  return toRemove.length
 }

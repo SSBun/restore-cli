@@ -11,14 +11,11 @@ npm install -g @ssbun/restore-cli
 ## Usage
 
 ```bash
-# Run setup wizard
+# Run setup wizard (pick destination + enable plugins)
 restore-cli config
 
-# List available plugins
-restore-cli plugin list
-
-# Install a plugin
-restore-cli plugin add vscode
+# Run a plugin tool (interactive)
+restore-cli tool
 
 # Run a backup
 restore-cli backup
@@ -35,7 +32,7 @@ restore-cli daemon start
 
 ## How it works
 
-- Plugins define what to back up (VS Code settings, dotfiles, SSH config, etc.)
+- Plugins are built into restore-cli; enable or disable them in `restore-cli config`
 - Snapshots are saved to your chosen destination in a `RestoreBackup` folder
 - Unchanged files are hardlinked between snapshots (Time Machine style)
 - Old snapshots are auto-pruned (default: keep 14)

@@ -1,18 +1,18 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { resolve } from 'node:path'
 import type { PluginManifest } from './types.js'
-
-const PLUGINS_DIR = resolve(homedir(), '.config', 'restore', 'plugins')
 
 const builtinPlugins: PluginManifest[] = [
   {
     name: 'vscode',
-    description: 'VS Code settings, keybindings, and extensions',
+    description: 'VS Code settings and keybindings',
     paths: [
       '~/Library/Application Support/Code/User/settings.json',
       '~/Library/Application Support/Code/User/keybindings.json',
     ],
+  },
+  {
+    name: 'vscode-extensions',
+    description: 'VS Code extensions folder (~/.vscode/extensions, very large)',
+    paths: ['~/.vscode/extensions'],
   },
   {
     name: 'dotfiles',
@@ -33,6 +33,13 @@ const builtinPlugins: PluginManifest[] = [
     name: 'git',
     description: 'Git configuration',
     paths: ['~/.gitconfig', '~/.gitignore_global'],
+    tools: [
+      {
+        name: 'show-config',
+        description: 'Print ~/.gitconfig to the terminal',
+        script: 'show-config.sh',
+      },
+    ],
   },
   {
     name: 'iterm2',
@@ -43,6 +50,29 @@ const builtinPlugins: PluginManifest[] = [
     name: 'vim',
     description: 'Vim/Neovim configuration',
     paths: ['~/.vimrc', '~/.config/nvim'],
+  },
+  {
+    name: 'mac-apps',
+    description: 'Installed Mac app inventory (JSON manifest for new-Mac recovery)',
+    paths: ['~/.config/restore/inventory/mac-apps.json'],
+    prepare: 'mac-apps-inventory',
+    tools: [
+      {
+        name: 'list',
+        description: 'List cataloged Mac apps from the inventory JSON',
+        script: 'list.sh',
+      },
+      {
+        name: 'refresh',
+        description: 'Regenerate the app inventory without running a full backup',
+        script: 'refresh.sh',
+      },
+      {
+        name: 'open-inventory',
+        description: 'Reveal mac-apps.json in Finder',
+        script: 'open-inventory.sh',
+      },
+    ],
   },
 ]
 
@@ -56,35 +86,4 @@ export function getPluginNames(): string[] {
 
 export function getBuiltinPlugin(name: string): PluginManifest | undefined {
   return builtinPlugins.find((p) => p.name === name)
-}
-
-export function getPluginDir(): string {
-  return PLUGINS_DIR
-}
-
-export function ensurePluginDir(): void {
-  if (!existsSync(PLUGINS_DIR)) {
-    mkdirSync(PLUGINS_DIR, { recursive: true })
-  }
-}
-
-export function addPlugin(name: string): boolean {
-  const plugin = getBuiltinPlugin(name)
-  if (!plugin) return false
-
-  ensurePluginDir()
-  const targetPath = resolve(PLUGINS_DIR, `${name}.json`)
-  writeFileSync(targetPath, JSON.stringify(plugin, null, 2), 'utf-8')
-  return true
-}
-
-export function getInstalledPlugins(): string[] {
-  ensurePluginDir()
-  try {
-    return readdirSync(PLUGINS_DIR)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => f.replace(/\.json$/, ''))
-  } catch {
-    return []
-  }
 }

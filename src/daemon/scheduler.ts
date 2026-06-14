@@ -1,4 +1,5 @@
 import { fork } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { error, info } from '../util/log.js'
@@ -7,12 +8,29 @@ import { readPid, removePidFile } from './lifecycle.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-export function startDaemon(intervalMs: number): void {
-  const child = fork(resolve(__dirname, '../../dist/daemon/worker.js'), [], {
+function forkDaemonWorker(intervalMs: number) {
+  const env = {
+    ...process.env,
+    RESTORE_DAEMON: '1',
+    RESTORE_INTERVAL: String(intervalMs),
+  }
+
+  const workerJs = resolve(__dirname, 'worker.js')
+  if (existsSync(workerJs)) {
+    return fork(workerJs, [], { stdio: 'pipe', detached: true, env })
+  }
+
+  const workerTs = resolve(__dirname, 'worker.ts')
+  return fork(workerTs, [], {
+    execArgv: [...process.execArgv, '--import', 'tsx'],
     stdio: 'pipe',
     detached: true,
-    env: { ...process.env, RESTORE_DAEMON: '1', RESTORE_INTERVAL: String(intervalMs) },
+    env,
   })
+}
+
+export function startDaemon(intervalMs: number): void {
+  const child = forkDaemonWorker(intervalMs)
 
   child.unref()
 
