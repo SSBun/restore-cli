@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { error, info } from '../util/log.js'
-import { readPid, removePidFile } from './lifecycle.js'
+import { isDaemonRunning, readPid, removePidFile } from './lifecycle.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -48,6 +48,11 @@ export function stopDaemon(): void {
   const pid = readPid()
   if (!pid) {
     info('Daemon is not running')
+    return
+  }
+
+  if (!isDaemonRunning()) {
+    info('Daemon is not running; removed stale PID file')
     return
   }
 

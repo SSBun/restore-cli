@@ -5,6 +5,10 @@ export function isQuiet(): boolean {
   return quiet
 }
 
+export function isVerbose(): boolean {
+  return verbose
+}
+
 export function info(msg: string): void {
   if (!quiet) console.log(msg)
 }

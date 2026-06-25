@@ -4,7 +4,10 @@ import { platform, tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  type MacAppsInventory,
+  buildMacAppsInstallPlan,
   findAppBundles,
+  findMissingMacApps,
   generateMacAppsInventory,
   readAppMetadata,
   shouldSkipScanDir,
@@ -35,6 +38,68 @@ function createFakeApp(root: string, appName: string): string {
 }
 
 describe('mac-apps-inventory', () => {
+  it('finds apps missing from the current machine by bundle id', () => {
+    const expected: MacAppsInventory = {
+      generatedAt: '2026-06-23T00:00:00.000Z',
+      platform: 'darwin',
+      appCount: 2,
+      apps: [
+        {
+          name: 'Present',
+          bundleId: 'com.example.present',
+          version: '1.0.0',
+          build: null,
+          path: '/Applications/Present.app',
+        },
+        {
+          name: 'Missing',
+          bundleId: 'com.example.missing',
+          version: '2.0.0',
+          build: null,
+          path: '/Applications/Missing.app',
+        },
+      ],
+    }
+    const current: MacAppsInventory = {
+      generatedAt: '2026-06-23T00:00:00.000Z',
+      platform: 'darwin',
+      appCount: 1,
+      apps: [
+        {
+          name: 'Present',
+          bundleId: 'com.example.present',
+          version: '1.1.0',
+          build: null,
+          path: '/Applications/Present.app',
+        },
+      ],
+    }
+
+    expect(findMissingMacApps(expected, current)).toEqual([expected.apps[1]])
+  })
+
+  it('builds manual install plans without automatic install commands', () => {
+    const missing = [
+      {
+        name: 'Manual App',
+        bundleId: 'com.example.manual',
+        version: '3.0.0',
+        build: null,
+        path: '/Applications/Manual App.app',
+      },
+    ]
+
+    expect(buildMacAppsInstallPlan(missing)).toEqual([
+      {
+        name: 'Manual App',
+        bundleId: 'com.example.manual',
+        path: '/Applications/Manual App.app',
+        installMethod: 'manual',
+        installCommand: null,
+      },
+    ])
+  })
+
   it('finds app bundles recursively', async () => {
     const root = mkdtempSync(resolve(tmpdir(), 'restore-mac-apps-'))
     createFakeApp(resolve(root, 'Nested'), 'Example')

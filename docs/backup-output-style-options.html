@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Backup Output Style Options</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f6f8;
+        --panel: #ffffff;
+        --ink: #17202a;
+        --muted: #687385;
+        --line: #d9dee7;
+        --terminal: #11151c;
+        --terminal-ink: #e8edf5;
+        --terminal-muted: #8e9aab;
+        --green: #2e7d4f;
+        --blue: #2864b4;
+        --amber: #a66300;
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.45;
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 36px 0 48px;
+      }
+
+      header {
+        margin-bottom: 28px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 30px;
+        line-height: 1.15;
+        letter-spacing: 0;
+      }
+
+      header p {
+        max-width: 760px;
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .option {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+
+      .option-header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 18px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .option h2 {
+        font-size: 17px;
+        letter-spacing: 0;
+      }
+
+      .option p {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .badge {
+        flex: 0 0 auto;
+        border: 1px solid #b9d1f2;
+        background: #edf5ff;
+        color: #164f93;
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .terminal {
+        margin: 0;
+        min-height: 360px;
+        padding: 18px;
+        overflow: auto;
+        background: var(--terminal);
+        color: var(--terminal-ink);
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, ui-monospace, monospace;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre;
+      }
+
+      .muted {
+        color: var(--terminal-muted);
+      }
+
+      .ok {
+        color: #7bd88f;
+      }
+
+      .warn {
+        color: #ffd166;
+      }
+
+      .info {
+        color: #8ab4ff;
+      }
+
+      .note {
+        margin-top: 22px;
+        padding: 16px 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      .note h3 {
+        font-size: 15px;
+      }
+
+      .note ul {
+        margin: 8px 0 0;
+        padding-left: 20px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          width: min(100vw - 22px, 720px);
+          padding-top: 24px;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Backup Command Output Style Options</h1>
+        <p>
+          These mockups use the same backup data: 12 plugins, 24 linked files, 6 copied files,
+          4 skipped paths, and 1 pruned snapshot. The goal is to keep normal output useful while
+          leaving file-level details for <code>--verbose</code>.
+        </p>
+      </header>
+
+      <section class="grid" aria-label="CLI output options">
+        <article class="option">
+          <div class="option-header">
+            <div>
+              <h2>Option A: Minimal Summary</h2>
+              <p>Smallest default output. Best when backup usually succeeds and details are rare.</p>
+            </div>
+          </div>
+          <pre class="terminal"><span class="info">Backup -&gt; iCloud</span>
+<span class="muted">/Users/caishilin/Library/Mobile Documents/com~apple~CloudDocs/RestoreBackup</span>
+
+Preparing inventories... <span class="ok">done</span> <span class="muted">(4)</span>
+Analyzing plugins...    <span class="ok">done</span> <span class="muted">(12 plugins, 6 changed, 4 skipped)</span>
+Syncing snapshot...     <span class="ok">done</span> <span class="muted">(24 linked, 6 copied)</span>
+Pruning snapshots...    <span class="ok">done</span> <span class="muted">(1 removed)</span>
+
+<span class="ok">Done</span> <span class="muted">2026-06-25T05-33-11.202</span></pre>
+        </article>
+
+        <article class="option">
+          <div class="option-header">
+            <div>
+              <h2>Option B: Stage Timeline</h2>
+              <p>Compact stage progress plus a short plugin change summary.</p>
+            </div>
+            <span class="badge">Recommended</span>
+          </div>
+          <pre class="terminal"><span class="info">Backup -&gt; iCloud</span>
+<span class="muted">/Users/caishilin/Library/Mobile Documents/com~apple~CloudDocs/RestoreBackup</span>
+
+[1/4] Preparing inventories  <span class="ok">done</span> <span class="muted">4 generated</span>
+[2/4] Analyzing plugins      <span class="ok">done</span> <span class="muted">12 scanned</span>
+[3/4] Syncing snapshot       <span class="ok">done</span> <span class="muted">24 linked, 6 copied</span>
+[4/4] Pruning snapshots      <span class="ok">done</span> <span class="muted">1 removed</span>
+
+Plan: <span class="muted">12 plugins, 6 changed, 4 skipped</span>
+
+Changed plugins:
+  dotfiles             <span class="muted">3 linked, 1 copied</span>
+  git                  <span class="muted">1 copied</span>
+  mac-apps             <span class="muted">1 copied</span> <span class="muted">(139 apps)</span>
+  vscode-extensions   <span class="muted">1 copied</span>
+  homebrew             <span class="muted">1 copied</span>
+  raycast              <span class="muted">1 linked, 1 copied</span>
+
+Skipped: <span class="warn">4 paths</span> <span class="muted">(use --verbose for details)</span>
+
+Snapshot: <span class="muted">2026-06-25T05-33-11.202</span>
+<span class="ok">Done</span></pre>
+        </article>
+
+        <article class="option">
+          <div class="option-header">
+            <div>
+              <h2>Option C: Grouped Results</h2>
+              <p>Shows which plugins changed without listing every unchanged plugin or file.</p>
+            </div>
+          </div>
+          <pre class="terminal"><span class="info">Backup -&gt; iCloud</span>
+<span class="muted">/Users/caishilin/Library/Mobile Documents/com~apple~CloudDocs/RestoreBackup</span>
+
+Prepare: <span class="ok">done</span> <span class="muted">4 inventories</span>
+Analyze: <span class="ok">done</span> <span class="muted">12 plugins, 4 skipped paths</span>
+
+Sync:
+  copied   <span class="muted">dotfiles, git, mac-apps, vscode-extensions, homebrew, raycast</span>
+  linked   <span class="muted">iterm2, zsh, vim, ssh, restore-cli</span>
+  empty    <span class="muted">vscode</span>
+
+Snapshot:
+  id       <span class="muted">2026-06-25T05-33-11.202</span>
+  files    <span class="muted">24 linked, 6 copied</span>
+  prune    <span class="muted">1 removed</span>
+
+<span class="ok">Done</span></pre>
+        </article>
+
+        <article class="option">
+          <div class="option-header">
+            <div>
+              <h2>Option D: Verbose Mode</h2>
+              <p>Use only for <code>backup --verbose</code>. Keeps file-level details available.</p>
+            </div>
+          </div>
+          <pre class="terminal"><span class="info">Backup -&gt; iCloud</span>
+<span class="muted">/Users/caishilin/Library/Mobile Documents/com~apple~CloudDocs/RestoreBackup</span>
+
+Preparing plugin inventories:
+  [ok] mac-apps             1/4
+  [ok] vscode-extensions   2/4
+  [ok] homebrew            3/4
+  [ok] raycast             4/4
+
+Analyzing plugins:
+  [ok] iterm2              unchanged 1
+  [ok] dotfiles            linked 3, copied 1
+  [ok] git                 copied 1
+  [ok] raycast             linked 1, copied 1
+
+Warnings:
+  <span class="warn">missing</span> ~/.gitignore_global
+  <span class="warn">missing</span> ~/Library/Application Support/Code/User/settings.json
+
+Syncing files:
+  link  ~/Library/Preferences/com.googlecode.iterm2.plist
+  copy  ~/.gitconfig
+  copy  ~/.config/restore/inventory/Brewfile
+
+<span class="ok">Done</span> <span class="muted">24 linked, 6 copied, pruned 1</span></pre>
+        </article>
+      </section>
+
+      <section class="note">
+        <h3>Suggested default</h3>
+        <ul>
+          <li>Use Option B for normal <code>backup</code> output.</li>
+          <li>Use Option D for <code>backup --verbose</code>.</li>
+          <li>Hide unchanged plugin names in normal mode; show only changed plugin names and totals.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

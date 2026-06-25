@@ -1,10 +1,10 @@
 {
   "name": "@ssbun/restore-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI tool to back up important files to iCloud or other destinations",
   "type": "module",
   "bin": {
-    "restore-cli": "./dist/index.js"
+    "restore-cli": "dist/index.js"
   },
   "files": [
     "dist/",
@@ -22,14 +22,15 @@
     "url": "git+https://github.com/ssbun/restore-cli.git"
   },
   "scripts": {
-    "build": "tsc && cp -R src/plugin/scripts dist/plugin/scripts",
-    "dev": "tsc --watch",
+    "build": "tsc -p tsconfig.build.json && rm -rf dist/plugin/scripts && cp -R src/plugin/scripts dist/plugin/scripts",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "biome check src/",
-    "format": "biome format --write src/",
-    "prepublishOnly": "pnpm build && pnpm test",
+    "lint": "biome check src tests",
+    "format": "biome format --write src tests",
+    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm build && pnpm test",
     "prepack": "pnpm build"
   },
   "dependencies": {

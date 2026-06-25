@@ -16,6 +16,10 @@ export function registerDaemonCommand(program: Command): void {
         return
       }
       const config = loadConfig()
+      if (config.daemon.intervalHours === 0) {
+        info('Daemon is disabled because daemon.intervalHours is 0; not starting')
+        return
+      }
       const intervalMs = config.daemon.intervalHours * 60 * 60 * 1000
       startDaemon(intervalMs)
     })

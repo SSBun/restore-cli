@@ -2,10 +2,18 @@ import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
 import type { Command } from 'commander'
 import { loadConfig } from '../config/loader.js'
-import { getSnapshotInfo, restoreFromSnapshot } from '../engine/restore.js'
+import { getSnapshotInfo, planRestoreFromSnapshot, restoreFromSnapshot } from '../engine/restore.js'
 import { getEnabledPlugins } from '../plugin/loader.js'
+import { getBuiltinPlugin } from '../plugin/registry.js'
 import { error, info } from '../util/log.js'
 import { getBackupRoot } from '../util/path.js'
+
+function printRestorePlan(files: { relativePath: string; destinationPath: string }[]): void {
+  info(`Restore plan (${files.length} files):`)
+  for (const file of files) {
+    info(`  ${file.relativePath} -> ${file.destinationPath}`)
+  }
+}
 
 export function registerRestoreCommand(program: Command): void {
   program
@@ -13,6 +21,9 @@ export function registerRestoreCommand(program: Command): void {
     .description('Restore files from a backup snapshot')
     .option('--snapshot <name>', 'Snapshot name to restore from')
     .option('--list', 'List available snapshots')
+    .option('--dry-run', 'Show what would be restored without copying')
+    .option('--plugin <name>', 'Restore only paths for a known plugin')
+    .option('--to <dir>', 'Restore files under a target directory instead of original paths')
     .action(async (options) => {
       const config = loadConfig()
       const backupRoot = getBackupRoot(config.destination.path)
@@ -54,9 +65,29 @@ export function registerRestoreCommand(program: Command): void {
         process.exit(1)
       }
 
-      // Confirm before overwriting
+      const plugins = getEnabledPlugins(config.plugins)
+      let restoreRoots = plugins.flatMap((plugin) => plugin.paths)
+      if (options.plugin) {
+        const plugin = getBuiltinPlugin(options.plugin)
+        if (!plugin) {
+          error(`Unknown plugin "${options.plugin}"`)
+          process.exit(1)
+        }
+        restoreRoots = plugin.paths
+      }
+
+      const restoreOptions = { toDir: options.to }
+      const plan = await planRestoreFromSnapshot(snapshot.path, restoreRoots, restoreOptions)
+      printRestorePlan(plan)
+
+      if (options.dryRun) {
+        info('Dry run only. No files were restored.')
+        return
+      }
+
+      const destination = options.to ? ` under ${options.to}` : ''
       const confirm = await p.confirm({
-        message: `Restore ${snapshot.fileCount} files from ${snapshotName}? This will OVERWRITE current files.`,
+        message: `Restore ${plan.length} files from ${snapshotName}${destination}? This may OVERWRITE existing files.`,
         initialValue: false,
       })
       if (isCancel(confirm) || !confirm) {
@@ -64,10 +95,7 @@ export function registerRestoreCommand(program: Command): void {
         process.exit(0)
       }
 
-      const plugins = getEnabledPlugins(config.plugins)
-      const restoreRoots = plugins.flatMap((plugin) => plugin.paths)
-
-      const { restored } = await restoreFromSnapshot(snapshot.path, restoreRoots)
+      const { restored } = await restoreFromSnapshot(snapshot.path, restoreRoots, restoreOptions)
       info(`Restored ${restored} files from ${snapshotName}`)
     })
 }

@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { isDaemonRunning } from '../../src/daemon/lifecycle.js'
 
 describe('daemon lifecycle patterns', () => {
   let tmpDir: string
@@ -50,5 +51,19 @@ describe('daemon lifecycle patterns', () => {
 
     const pid = Number(readFileSync(pidPath, 'utf-8').trim())
     expect(() => process.kill(pid, 0)).toThrow()
+  })
+
+  it('removes a stale daemon PID file', () => {
+    writeFileSync(pidPath, '999999999', 'utf-8')
+
+    expect(isDaemonRunning(pidPath)).toBe(false)
+    expect(existsSync(pidPath)).toBe(false)
+  })
+
+  it('does not treat an unrelated live process as the restore daemon', () => {
+    writeFileSync(pidPath, String(process.pid), 'utf-8')
+
+    expect(isDaemonRunning(pidPath)).toBe(false)
+    expect(existsSync(pidPath)).toBe(false)
   })
 })

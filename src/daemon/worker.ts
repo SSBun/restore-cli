@@ -1,37 +1,17 @@
-import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { resolve } from 'node:path'
-import { loadConfig } from '../config/loader.js'
-import { executeBackup } from '../engine/run-backup.js'
-import { error, info } from '../util/log.js'
+import { removePidFile, writePidFile } from './lifecycle.js'
+import { createDaemonTick } from './tick.js'
 
-const PID_PATH = resolve(homedir(), '.config', 'restore', 'restore.pid')
-
-writeFileSync(PID_PATH, String(process.pid), 'utf-8')
+writePidFile()
 
 const intervalMs = Number(process.env.RESTORE_INTERVAL) || 12 * 60 * 60 * 1000
-
-async function tick(): Promise<void> {
-  try {
-    info(`Daemon backup starting (${new Date().toISOString()})`)
-    const config = loadConfig()
-    const { snapshotName } = await executeBackup(config)
-    info(`Daemon backup complete: ${snapshotName}`)
-  } catch (err) {
-    error(`Daemon backup failed: ${(err as Error).message}`)
-  }
-}
+const tick = createDaemonTick()
 
 tick()
 const interval = setInterval(tick, intervalMs)
 
 process.on('SIGTERM', () => {
   clearInterval(interval)
-  try {
-    unlinkSync(PID_PATH)
-  } catch {
-    // ignore
-  }
+  removePidFile()
   process.exit(0)
 })
 

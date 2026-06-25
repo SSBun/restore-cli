@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { type Dirent, existsSync } from 'node:fs'
-import { mkdir, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { basename, resolve } from 'node:path'
 import { debug } from '../util/log.js'
@@ -21,6 +21,23 @@ export interface MacAppsInventory {
   platform: 'darwin' | 'other'
   appCount: number
   apps: MacAppEntry[]
+}
+
+export interface MacAppsInstallPlanEntry {
+  name: string
+  bundleId: string | null
+  path: string
+  installMethod: 'manual'
+  installCommand: null
+}
+
+export interface MacAppsRestorePlan {
+  inventoryPath: string
+  inventoryGeneratedAt: string
+  currentGeneratedAt: string
+  missingCount: number
+  missingApps: MacAppEntry[]
+  installPlan: MacAppsInstallPlanEntry[]
 }
 
 const SCAN_ROOTS = ['~/Applications', '/Applications'] as const
@@ -135,21 +152,97 @@ async function collectDarwinApps(): Promise<MacAppEntry[]> {
   return dedupeByBundleId([...discovered].map(readAppMetadata))
 }
 
-/// Scan non-system Mac applications and write a JSON inventory file.
-export async function generateMacAppsInventory(outputPath: string): Promise<MacAppsInventory> {
-  const resolvedOutput = expandPath(outputPath)
-  await mkdir(resolve(resolvedOutput, '..'), { recursive: true })
-
+/// Scan non-system Mac applications without writing an inventory file.
+export async function scanMacAppsInventory(): Promise<MacAppsInventory> {
   const apps = platform() === 'darwin' ? await collectDarwinApps() : []
-  const inventory: MacAppsInventory = {
+  return {
     generatedAt: new Date().toISOString(),
     platform: platform() === 'darwin' ? 'darwin' : 'other',
     appCount: apps.length,
     apps,
   }
+}
+
+/// Scan non-system Mac applications and write a JSON inventory file.
+export async function generateMacAppsInventory(outputPath: string): Promise<MacAppsInventory> {
+  const resolvedOutput = expandPath(outputPath)
+  await mkdir(resolve(resolvedOutput, '..'), { recursive: true })
+
+  const inventory = await scanMacAppsInventory()
 
   await writeFile(resolvedOutput, `${JSON.stringify(inventory, null, 2)}\n`, 'utf-8')
-  debug(`Generated Mac apps inventory: ${resolvedOutput} (${apps.length} apps)`)
+  debug(`Generated Mac apps inventory: ${resolvedOutput} (${inventory.apps.length} apps)`)
 
   return inventory
+}
+
+function appIdentity(app: MacAppEntry): string {
+  return app.bundleId ?? app.path
+}
+
+/// Return apps from the inventory that are not present on the current machine.
+export function findMissingMacApps(
+  expected: MacAppsInventory,
+  current: MacAppsInventory,
+): MacAppEntry[] {
+  const currentApps = new Set(current.apps.map(appIdentity))
+  return expected.apps.filter((app) => !currentApps.has(appIdentity(app)))
+}
+
+/// Build a hand-install plan. No automatic package-manager mapping is attempted.
+export function buildMacAppsInstallPlan(missingApps: MacAppEntry[]): MacAppsInstallPlanEntry[] {
+  return missingApps.map((app) => ({
+    name: app.name,
+    bundleId: app.bundleId,
+    path: app.path,
+    installMethod: 'manual',
+    installCommand: null,
+  }))
+}
+
+export async function readMacAppsInventory(inputPath: string): Promise<MacAppsInventory> {
+  const resolvedInput = expandPath(inputPath)
+  return JSON.parse(await readFile(resolvedInput, 'utf-8')) as MacAppsInventory
+}
+
+export async function generateMacAppsRestorePlan(
+  inputPath = MAC_APPS_INVENTORY_RELATIVE_PATH,
+): Promise<MacAppsRestorePlan> {
+  const resolvedInput = expandPath(inputPath)
+  const expected = await readMacAppsInventory(resolvedInput)
+  const current = await scanMacAppsInventory()
+  const missingApps = findMissingMacApps(expected, current)
+
+  return {
+    inventoryPath: resolvedInput,
+    inventoryGeneratedAt: expected.generatedAt,
+    currentGeneratedAt: current.generatedAt,
+    missingCount: missingApps.length,
+    missingApps,
+    installPlan: buildMacAppsInstallPlan(missingApps),
+  }
+}
+
+export function formatMacAppsRestorePlan(plan: MacAppsRestorePlan): string {
+  const lines = [
+    'Mac apps restore plan',
+    `Inventory: ${plan.inventoryPath}`,
+    `Inventory generated: ${plan.inventoryGeneratedAt}`,
+    `Missing apps: ${plan.missingCount}`,
+  ]
+
+  if (plan.installPlan.length === 0) {
+    lines.push('', 'No missing apps found.')
+    return `${lines.join('\n')}\n`
+  }
+
+  lines.push('', 'Manual install plan:')
+  for (const app of plan.installPlan) {
+    lines.push(`- ${app.name}`)
+    lines.push(`  bundleId: ${app.bundleId ?? '-'}`)
+    lines.push(`  path: ${app.path}`)
+    lines.push('  install: manual')
+  }
+
+  return `${lines.join('\n')}\n`
 }

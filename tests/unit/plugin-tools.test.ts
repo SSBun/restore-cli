@@ -13,11 +13,23 @@ describe('plugin tools', () => {
     const names = plugins.map((plugin) => plugin.name)
     expect(names).toContain('mac-apps')
     expect(names).toContain('git')
+    expect(names).toContain('homebrew')
   })
 
   it('resolves mac-apps tool scripts', () => {
     expect(resolveToolScriptPath('mac-apps', 'list.sh')).toBeTruthy()
     expect(resolveToolScriptPath('mac-apps', 'refresh.sh')).toBeTruthy()
+    expect(resolveToolScriptPath('mac-apps', 'restore-plan.sh')).toBeTruthy()
+  })
+
+  it('resolves homebrew tool scripts', () => {
+    expect(resolveToolScriptPath('homebrew', 'refresh.sh')).toBeTruthy()
+    expect(resolveToolScriptPath('homebrew', 'show.sh')).toBeTruthy()
+  })
+
+  it('resolves vscode extensions tool scripts', () => {
+    expect(resolveToolScriptPath('vscode-extensions', 'refresh.sh')).toBeTruthy()
+    expect(resolveToolScriptPath('vscode-extensions', 'show.sh')).toBeTruthy()
   })
 
   it('returns tool metadata with descriptions', () => {

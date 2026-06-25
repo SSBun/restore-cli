@@ -2,6 +2,11 @@ import type { PluginManifest } from './types.js'
 
 const builtinPlugins: PluginManifest[] = [
   {
+    name: 'restore-cli',
+    description: 'restore-cli configuration file',
+    paths: ['~/.config/restore/config.json5'],
+  },
+  {
     name: 'vscode',
     description: 'VS Code settings and keybindings',
     paths: [
@@ -11,8 +16,21 @@ const builtinPlugins: PluginManifest[] = [
   },
   {
     name: 'vscode-extensions',
-    description: 'VS Code extensions folder (~/.vscode/extensions, very large)',
-    paths: ['~/.vscode/extensions'],
+    description: 'VS Code installed extensions inventory',
+    paths: ['~/.config/restore/inventory/vscode-extensions.txt'],
+    prepare: 'vscode-extensions-list',
+    tools: [
+      {
+        name: 'refresh',
+        description: 'Regenerate the VS Code extensions inventory',
+        script: 'refresh.sh',
+      },
+      {
+        name: 'show',
+        description: 'Print the saved VS Code extensions inventory',
+        script: 'show.sh',
+      },
+    ],
   },
   {
     name: 'dotfiles',
@@ -23,6 +41,11 @@ const builtinPlugins: PluginManifest[] = [
     name: 'ssh',
     description: 'SSH config and keys',
     paths: ['~/.ssh/config'],
+  },
+  {
+    name: 'sops',
+    description: 'SOPS configuration and local key material',
+    paths: ['~/.sops'],
   },
   {
     name: 'zsh',
@@ -52,6 +75,33 @@ const builtinPlugins: PluginManifest[] = [
     paths: ['~/.vimrc', '~/.config/nvim'],
   },
   {
+    name: 'homebrew',
+    description: 'Homebrew Brewfile inventory for new-Mac package restore',
+    paths: ['~/.config/restore/inventory/Brewfile'],
+    prepare: 'homebrew-brewfile',
+    tools: [
+      {
+        name: 'refresh',
+        description: 'Regenerate the Homebrew Brewfile inventory',
+        script: 'refresh.sh',
+      },
+      {
+        name: 'show',
+        description: 'Print the saved Homebrew Brewfile',
+        script: 'show.sh',
+      },
+    ],
+  },
+  {
+    name: 'raycast',
+    description: 'Raycast extension inventory and preferences',
+    paths: [
+      '~/.config/restore/inventory/raycast-extensions.json',
+      '~/Library/Preferences/com.raycast.macos.plist',
+    ],
+    prepare: 'raycast-extensions',
+  },
+  {
     name: 'mac-apps',
     description: 'Installed Mac app inventory (JSON manifest for new-Mac recovery)',
     paths: ['~/.config/restore/inventory/mac-apps.json'],
@@ -66,6 +116,11 @@ const builtinPlugins: PluginManifest[] = [
         name: 'refresh',
         description: 'Regenerate the app inventory without running a full backup',
         script: 'refresh.sh',
+      },
+      {
+        name: 'restore-plan',
+        description: 'Compare this Mac with the inventory and print a manual install plan',
+        script: 'restore-plan.sh',
       },
       {
         name: 'open-inventory',

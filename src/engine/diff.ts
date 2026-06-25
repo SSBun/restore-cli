@@ -6,8 +6,23 @@ export interface FileDiff {
   type: 'added' | 'modified' | 'unchanged'
 }
 
+export interface SkippedPath {
+  path: string
+  reason: 'missing' | 'inaccessible'
+}
+
+export interface DiffResult {
+  diffs: FileDiff[]
+  skipped: SkippedPath[]
+}
+
+export function skippedPathReason(err: unknown): SkippedPath['reason'] {
+  const code = (err as NodeJS.ErrnoException).code
+  return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'inaccessible'
+}
+
 /// Recursively collect all files in a directory.
-export async function collectFiles(dir: string): Promise<string[]> {
+export async function collectFiles(dir: string, skipped: SkippedPath[] = []): Promise<string[]> {
   const files: string[] = []
   async function walk(current: string) {
     try {
@@ -20,8 +35,8 @@ export async function collectFiles(dir: string): Promise<string[]> {
           files.push(full)
         }
       }
-    } catch {
-      // skip inaccessible or deleted directories
+    } catch (err) {
+      skipped.push({ path: current, reason: skippedPathReason(err) })
     }
   }
   await walk(dir)
@@ -33,35 +48,48 @@ export async function collectFiles(dir: string): Promise<string[]> {
 /// - Parameter sources: List of source file or directory paths to back up.
 /// - Parameter snapshotDir: Path to the latest snapshot directory, or `null` if none exists.
 /// - Returns: An array of `FileDiff` entries describing each file's state.
-export async function diffWithLastSnapshot(
+export async function diffWithLastSnapshotDetailed(
   sources: string[],
   snapshotDir: string | null,
-): Promise<FileDiff[]> {
+): Promise<DiffResult> {
   // Gather all source file paths
   const sourceFiles: string[] = []
+  const skipped: SkippedPath[] = []
   for (const src of sources) {
     try {
       const s = await stat(src)
       if (s.isDirectory()) {
-        const children = await collectFiles(src)
+        const children = await collectFiles(src, skipped)
         sourceFiles.push(...children)
       } else {
         sourceFiles.push(src)
       }
-    } catch {}
+    } catch (err) {
+      skipped.push({ path: src, reason: skippedPathReason(err) })
+    }
   }
 
   if (!snapshotDir) {
     // No previous snapshot — everything is "added"
-    return sourceFiles.map((f) => ({ path: f, type: 'added' as const }))
+    return {
+      diffs: sourceFiles.map((f) => ({ path: f, type: 'added' as const })),
+      skipped,
+    }
   }
 
   const result: FileDiff[] = []
   for (const file of sourceFiles) {
     const snapshotPath = resolve(snapshotDir, relative('/', file))
+    let srcStat: Awaited<ReturnType<typeof stat>>
+    try {
+      srcStat = await stat(file)
+    } catch (err) {
+      skipped.push({ path: file, reason: skippedPathReason(err) })
+      continue
+    }
+
     try {
       const snapStat = await stat(snapshotPath)
-      const srcStat = await stat(file)
       if (
         srcStat.size !== snapStat.size ||
         Math.round(srcStat.mtimeMs) !== Math.round(snapStat.mtimeMs)
@@ -75,5 +103,12 @@ export async function diffWithLastSnapshot(
     }
   }
 
-  return result
+  return { diffs: result, skipped }
+}
+
+export async function diffWithLastSnapshot(
+  sources: string[],
+  snapshotDir: string | null,
+): Promise<FileDiff[]> {
+  return (await diffWithLastSnapshotDetailed(sources, snapshotDir)).diffs
 }

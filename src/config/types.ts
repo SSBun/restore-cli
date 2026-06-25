@@ -7,7 +7,7 @@ export const DestinationSchema = z.object({
 })
 
 export const DaemonConfigSchema = z.object({
-  intervalHours: z.number().positive().default(12),
+  intervalHours: z.number().nonnegative().default(12),
 })
 
 export const ConfigSchema = z.object({

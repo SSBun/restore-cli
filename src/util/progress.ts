@@ -30,3 +30,9 @@ export function clearProgressLine(): void {
   if (isQuiet() || !process.stderr.isTTY) return
   process.stderr.write(`\r${' '.repeat(process.stderr.columns || 80)}\r`)
 }
+
+export function renderPluginDone(pluginName: string, linked: number, copied: number): void {
+  if (isQuiet() || !process.stderr.isTTY) return
+  process.stderr.write(`\r${' '.repeat(process.stderr.columns || 80)}\r`)
+  process.stderr.write(`✓ ${pluginName} · ${linked} linked · ${copied} copied\n`)
+}

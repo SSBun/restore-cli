@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { diffWithLastSnapshot } from './diff.js'
+import { diffWithLastSnapshot, diffWithLastSnapshotDetailed } from './diff.js'
 import { createSnapshot, getLatestSnapshotDir } from './snapshot.js'
 
 describe('diffWithLastSnapshot', () => {
@@ -40,5 +40,15 @@ describe('diffWithLastSnapshot', () => {
     const diffs = await diffWithLastSnapshot([sourceDir], snapshotDir)
     const fileDiff = diffs.find((d) => d.path === file)
     expect(fileDiff?.type).toBe('unchanged')
+  })
+
+  it('reports missing source paths as skipped', async () => {
+    const tmpDir = mkdtempSync(resolve(tmpdir(), 'restore-diff-'))
+    const missing = resolve(tmpDir, 'missing.txt')
+
+    const result = await diffWithLastSnapshotDetailed([missing], null)
+
+    expect(result.diffs).toEqual([])
+    expect(result.skipped).toEqual([{ path: missing, reason: 'missing' }])
   })
 })

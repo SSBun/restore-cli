@@ -1,42 +1,45 @@
-import { rm, stat } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { listSubdirs } from '../util/fs.js'
 import { debug } from '../util/log.js'
-import { isValidSnapshotName } from './snapshot.js'
+import { listCompleteSnapshots } from './snapshot.js'
 
-/// Returns snapshot directory names under `destDir`, sorted oldest-first by birthtime.
-/// Only directories matching the snapshot timestamp format are included.
+export interface PruneResult {
+  removed: number
+  failed: string[]
+}
+
+/// Returns complete snapshot directory names under `destDir`, sorted oldest-first by name time.
 export async function listSnapshots(destDir: string): Promise<string[]> {
-  try {
-    const dirs = await listSubdirs(destDir)
-    const snapshots = dirs.filter(isValidSnapshotName)
-    const withTime = await Promise.all(
-      snapshots.map(async (name) => {
-        try {
-          const s = await stat(resolve(destDir, name))
-          return { name, time: s.birthtimeMs || s.mtimeMs }
-        } catch {
-          return { name, time: 0 }
-        }
-      }),
-    )
-    return withTime.sort((a, b) => a.time - b.time).map((d) => d.name)
-  } catch {
-    return []
+  return listCompleteSnapshots(destDir)
+}
+
+/// Removes the oldest snapshots exceeding `maxCount`, reporting failures without throwing.
+export async function pruneSnapshotsDetailed(
+  destDir: string,
+  maxCount: number,
+): Promise<PruneResult> {
+  const snapshots = await listSnapshots(destDir)
+  if (snapshots.length <= maxCount) return { removed: 0, failed: [] }
+
+  const toRemove = snapshots.slice(0, snapshots.length - maxCount)
+  let removed = 0
+  const failed: string[] = []
+  for (const name of toRemove) {
+    const fullPath = resolve(destDir, name)
+    try {
+      await rm(fullPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      removed++
+      debug(`Pruned old snapshot: ${name}`)
+    } catch {
+      failed.push(name)
+      debug(`Failed to prune old snapshot: ${name}`)
+    }
   }
+  return { removed, failed }
 }
 
 /// Removes the oldest snapshots exceeding `maxCount`.
 /// Returns the number of snapshots removed.
 export async function pruneSnapshots(destDir: string, maxCount: number): Promise<number> {
-  const snapshots = await listSnapshots(destDir)
-  if (snapshots.length <= maxCount) return 0
-
-  const toRemove = snapshots.slice(0, snapshots.length - maxCount)
-  for (const name of toRemove) {
-    const fullPath = resolve(destDir, name)
-    await rm(fullPath, { recursive: true, force: true })
-    debug(`Pruned old snapshot: ${name}`)
-  }
-  return toRemove.length
+  return (await pruneSnapshotsDetailed(destDir, maxCount)).removed
 }

@@ -8,6 +8,7 @@ import { registerBackupCommand } from './cli/backup.js'
 import { registerConfigCommand } from './cli/config.js'
 import { registerDaemonCommand } from './cli/daemon.js'
 import { registerRestoreCommand } from './cli/restore.js'
+import { registerStatusCommand } from './cli/status.js'
 import { registerToolCommand } from './cli/tool.js'
 import { configExists } from './config/loader.js'
 import { runWizard } from './config/wizard.js'
@@ -38,6 +39,7 @@ registerBackupCommand(program)
 registerRestoreCommand(program)
 registerToolCommand(program)
 registerDaemonCommand(program)
+registerStatusCommand(program)
 
 // First-run: auto-launch config wizard if no config exists
 const noConfig = !configExists()

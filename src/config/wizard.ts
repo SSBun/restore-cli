@@ -96,7 +96,7 @@ async function askDestination(initial?: Destination): Promise<Destination | null
 
 async function askBackupSettings(initial?: { interval: number; maxSnapshots: number }) {
   const daemonInterval = await p.text({
-    message: 'Auto-backup interval in hours (0 to disable daemon)',
+    message: 'Auto-backup interval in hours (0 disables the background daemon)',
     placeholder: '12',
     initialValue: initial ? String(initial.interval) : undefined,
     validate: (v) => {
@@ -202,7 +202,7 @@ export async function runWizard(): Promise<void> {
         {
           value: 'edit-settings',
           label: 'Change backup settings',
-          hint: `interval ${settings.interval}h, ${settings.maxSnapshots} snapshots`,
+          hint: `${settings.interval === 0 ? 'daemon disabled' : `interval ${settings.interval}h`}, ${settings.maxSnapshots} snapshots`,
         },
         {
           value: 'edit-plugins',

@@ -1,8 +1,7 @@
-import { statSync } from 'node:fs'
 import { copyFile, mkdir, readdir } from 'node:fs/promises'
-import { resolve } from 'node:path'
-import { listSubdirs } from '../util/fs.js'
+import { dirname, resolve } from 'node:path'
 import { isUnderRoot } from '../util/path.js'
+import { listCompleteSnapshots, snapshotNameToDate } from './snapshot.js'
 
 /// Metadata for a single snapshot.
 export interface SnapshotInfo {
@@ -12,20 +11,29 @@ export interface SnapshotInfo {
   fileCount: number
 }
 
+export interface RestoreFilePlan {
+  sourcePath: string
+  relativePath: string
+  destinationPath: string
+}
+
+export interface RestoreOptions {
+  toDir?: string
+}
+
 /// Returns all snapshots under `destDir` sorted newest-first.
 export async function getSnapshotInfo(destDir: string): Promise<SnapshotInfo[]> {
-  const items = await listSubdirs(destDir)
+  const items = await listCompleteSnapshots(destDir)
   const snapshots: SnapshotInfo[] = []
 
   for (const name of items) {
     const fullPath = resolve(destDir, name)
     try {
-      const s = statSync(fullPath)
       const files = await countFiles(fullPath)
       snapshots.push({
         name,
         path: fullPath,
-        createdAt: s.birthtime || s.mtime,
+        createdAt: snapshotNameToDate(name),
         fileCount: files,
       })
     } catch {
@@ -71,12 +79,15 @@ async function walkFiles(dir: string): Promise<string[]> {
 /// so `snapshotDir/Users/name/file.txt` restores to `/Users/name/file.txt`.
 /// Only files whose paths fall under one of the `restoreRoots` are restored.
 /// Roots may use `~/` prefixes; they are expanded before matching.
+/// When `toDir` is provided, files are restored under that directory while
+/// preserving the snapshot-relative path.
 /// - Returns: The number of files successfully restored.
-export async function restoreFromSnapshot(
+export async function planRestoreFromSnapshot(
   snapshotDir: string,
   restoreRoots: string[],
-): Promise<{ restored: number }> {
-  let restored = 0
+  options: RestoreOptions = {},
+): Promise<RestoreFilePlan[]> {
+  const planned: RestoreFilePlan[] = []
   const files = await walkFiles(snapshotDir)
 
   for (const fullPath of files) {
@@ -88,11 +99,31 @@ export async function restoreFromSnapshot(
     const matched = restoreRoots.some((root) => isUnderRoot(relativePath, root))
     if (!matched) continue
 
-    const destPath = resolve('/', relativePath)
-    await mkdir(resolve(destPath, '..'), { recursive: true })
-    await copyFile(fullPath, destPath)
+    planned.push({
+      sourcePath: fullPath,
+      relativePath,
+      destinationPath: options.toDir
+        ? resolve(options.toDir, relativePath)
+        : resolve('/', relativePath),
+    })
+  }
+
+  return planned
+}
+
+export async function restoreFromSnapshot(
+  snapshotDir: string,
+  restoreRoots: string[],
+  options: RestoreOptions = {},
+): Promise<{ restored: number; planned: RestoreFilePlan[] }> {
+  let restored = 0
+  const planned = await planRestoreFromSnapshot(snapshotDir, restoreRoots, options)
+
+  for (const file of planned) {
+    await mkdir(dirname(file.destinationPath), { recursive: true })
+    await copyFile(file.sourcePath, file.destinationPath)
     restored++
   }
 
-  return { restored }
+  return { restored, planned }
 }

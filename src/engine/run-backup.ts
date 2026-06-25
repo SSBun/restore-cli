@@ -1,15 +1,21 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { Config } from '../config/types.js'
 import { getEnabledPlugins } from '../plugin/loader.js'
 import { preparePlugins } from '../plugin/prepare.js'
 import type { PluginManifest } from '../plugin/types.js'
 import { expandPath, getBackupRoot } from '../util/path.js'
-import { clearProgressLine, renderPluginProgress } from '../util/progress.js'
-import { type FileDiff, diffWithLastSnapshot } from './diff.js'
-import { pruneSnapshots } from './prune.js'
+import { clearProgressLine, renderPluginDone, renderPluginProgress } from '../util/progress.js'
 import {
+  type FileDiff,
+  type SkippedPath,
+  diffWithLastSnapshotDetailed,
+  skippedPathReason,
+} from './diff.js'
+import { pruneSnapshotsDetailed } from './prune.js'
+import {
+  type SnapshotSyncAction,
   applyDiffsToSnapshot,
   ensureBackupRoot,
   getLatestSnapshotDir,
@@ -29,6 +35,7 @@ export interface BackupPlan {
   latestSnapshot: string | null
   pluginPlans: PluginPlan[]
   changes: string[]
+  skippedPaths: SkippedPath[]
   rows: PluginBackupRow[]
 }
 
@@ -38,9 +45,18 @@ export interface BackupRunResult {
   linked: number
   copied: number
   pruned: number
+  pruneFailed: string[]
+  pluginResults: PluginSyncResult[]
   plugins: PluginBackupRow[]
   changes: string[]
+  skippedPaths: SkippedPath[]
   dryRun: boolean
+}
+
+export interface PluginSyncResult {
+  name: string
+  linked: number
+  copied: number
 }
 
 export interface BackupResult {
@@ -56,26 +72,48 @@ interface PluginPlan {
 }
 
 export interface BackupProgressHandlers {
+  onPrepareStart?: (pluginName: string, current: number, total: number) => void
+  onPrepareDone?: (pluginName: string, current: number, total: number) => void
+  onAnalyzeStart?: (pluginName: string, current: number, total: number) => void
   onAnalyze?: (completed: number, total: number, pluginName: string) => void
-  onSync?: (completed: number, total: number, pluginName: string) => void
+  onSyncStart?: (pluginName: string, completed: number, total: number, fileTotal: number) => void
+  onSyncFile?: (event: BackupFileSyncProgress) => void
+  onSync?: (completed: number, total: number, pluginName: string, result: PluginSyncResult) => void
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
+export interface BackupFileSyncProgress {
+  pluginName: string
+  action: SnapshotSyncAction
+  path: string
+  current: number
+  total: number
+  linked: number
+  copied: number
+}
+
+async function getStatError(filePath: string): Promise<unknown | null> {
   try {
     await stat(filePath)
-    return true
-  } catch {
-    return false
+    return null
+  } catch (err) {
+    return err
   }
 }
 
-async function filterValidDiffs(diffs: FileDiff[]): Promise<FileDiff[]> {
+async function filterValidDiffs(
+  diffs: FileDiff[],
+): Promise<{ diffs: FileDiff[]; skipped: SkippedPath[] }> {
   const valid: FileDiff[] = []
+  const skipped: SkippedPath[] = []
   for (const diff of diffs) {
-    if (diff.type === 'added' && !(await fileExists(diff.path))) continue
+    const statError = diff.type === 'added' ? await getStatError(diff.path) : null
+    if (statError) {
+      skipped.push({ path: diff.path, reason: skippedPathReason(statError) })
+      continue
+    }
     valid.push(diff)
   }
-  return valid
+  return { diffs: valid, skipped }
 }
 
 function countDiffStats(diffs: FileDiff[]): Pick<PluginBackupRow, 'unchanged' | 'updated' | 'new'> {
@@ -112,20 +150,33 @@ export async function prepareAndPlan(
   }
 
   if (!options?.skipPrepare) {
-    await preparePlugins(plugins)
+    await preparePlugins(plugins, {
+      onPrepareStart: (pluginName, current, total) => {
+        options?.progress?.onPrepareStart?.(pluginName, current, total)
+      },
+      onPrepareDone: (pluginName, current, total) => {
+        options?.progress?.onPrepareDone?.(pluginName, current, total)
+      },
+    })
   }
 
   const backupRoot = getBackupRoot(config.destination.path)
   const latestSnapshot = await getLatestSnapshotDir(backupRoot)
   const pluginPlans: PluginPlan[] = []
   const changes: string[] = []
+  const skippedPaths: SkippedPath[] = []
   const total = plugins.length
+  const renderInlineProgress = !options?.progress?.onAnalyzeStart && !options?.progress?.onAnalyze
 
   for (let i = 0; i < plugins.length; i++) {
     const plugin = plugins[i]
     const paths = plugin.paths.map(expandPath)
 
-    const diffs = await filterValidDiffs(await diffWithLastSnapshot(paths, latestSnapshot))
+    options?.progress?.onAnalyzeStart?.(plugin.name, i + 1, total)
+    const diffResult = await diffWithLastSnapshotDetailed(paths, latestSnapshot)
+    const filtered = await filterValidDiffs(diffResult.diffs)
+    const diffs = filtered.diffs
+    skippedPaths.push(...diffResult.skipped, ...filtered.skipped)
     pluginPlans.push({
       plugin,
       diffs,
@@ -142,16 +193,21 @@ export async function prepareAndPlan(
     }
 
     options?.progress?.onAnalyze?.(i + 1, total, plugin.name)
-    renderPluginProgress(i + 1, total, plugin.name, 'Analyzing')
+    if (renderInlineProgress) {
+      renderPluginProgress(i + 1, total, plugin.name, 'Analyzing')
+    }
   }
 
-  clearProgressLine()
+  if (renderInlineProgress) {
+    clearProgressLine()
+  }
 
   return {
     backupRoot,
     latestSnapshot,
     pluginPlans,
     changes,
+    skippedPaths,
     rows: pluginPlans.map((plan) => plan.row),
   }
 }
@@ -161,31 +217,78 @@ export async function executeBackupPlan(
   plan: BackupPlan,
   maxSnapshots: number,
   progress?: BackupProgressHandlers,
-): Promise<{ snapshotName: string; linked: number; copied: number; pruned: number }> {
+): Promise<{
+  snapshotName: string
+  linked: number
+  copied: number
+  pruned: number
+  pruneFailed: string[]
+  pluginResults: PluginSyncResult[]
+}> {
   await ensureBackupRoot(plan.backupRoot)
   const timestamp = snapshotTimestamp()
   const snapshotPath = resolve(plan.backupRoot, timestamp)
-  await mkdir(snapshotPath, { recursive: true })
+  const pendingSnapshotPath = resolve(plan.backupRoot, `${timestamp}.in-progress`)
+  await mkdir(pendingSnapshotPath, { recursive: true })
 
   let linked = 0
   let copied = 0
+  const pluginResults: PluginSyncResult[] = []
   const total = plan.pluginPlans.length
+  const renderInlineProgress = !progress?.onSyncStart && !progress?.onSyncFile
 
-  for (let i = 0; i < plan.pluginPlans.length; i++) {
-    const pluginPlan = plan.pluginPlans[i]
+  try {
+    for (let i = 0; i < plan.pluginPlans.length; i++) {
+      const pluginPlan = plan.pluginPlans[i]
+      if (renderInlineProgress) {
+        renderPluginProgress(i + 1, total, pluginPlan.plugin.name, 'Syncing')
+      }
+      progress?.onSyncStart?.(pluginPlan.plugin.name, i, total, pluginPlan.diffs.length)
 
-    const stats = await applyDiffsToSnapshot(snapshotPath, pluginPlan.diffs, plan.latestSnapshot)
-    linked += stats.linked
-    copied += stats.copied
+      const stats = await applyDiffsToSnapshot(
+        pendingSnapshotPath,
+        pluginPlan.diffs,
+        plan.latestSnapshot,
+        {
+          onFileStart: (event) => {
+            progress?.onSyncFile?.({
+              pluginName: pluginPlan.plugin.name,
+              ...event,
+            })
+          },
+        },
+      )
+      linked += stats.linked
+      copied += stats.copied
+      const pluginResult = {
+        name: pluginPlan.plugin.name,
+        linked: stats.linked,
+        copied: stats.copied,
+      }
+      pluginResults.push(pluginResult)
 
-    progress?.onSync?.(i + 1, total, pluginPlan.plugin.name)
-    renderPluginProgress(i + 1, total, pluginPlan.plugin.name, 'Syncing')
+      progress?.onSync?.(i + 1, total, pluginPlan.plugin.name, pluginResult)
+      if (renderInlineProgress) {
+        renderPluginDone(pluginPlan.plugin.name, stats.linked, stats.copied)
+      }
+    }
+  } catch (err) {
+    await rm(pendingSnapshotPath, { recursive: true, force: true })
+    throw err
   }
 
   clearProgressLine()
+  await rename(pendingSnapshotPath, snapshotPath)
 
-  const pruned = await pruneSnapshots(plan.backupRoot, maxSnapshots)
-  return { snapshotName: timestamp, linked, copied, pruned }
+  const pruneResult = await pruneSnapshotsDetailed(plan.backupRoot, maxSnapshots)
+  return {
+    snapshotName: timestamp,
+    linked,
+    copied,
+    pruned: pruneResult.removed,
+    pruneFailed: pruneResult.failed,
+    pluginResults,
+  }
 }
 
 export async function runBackup(
@@ -197,7 +300,7 @@ export async function runBackup(
   },
 ): Promise<BackupRunResult> {
   const plan = await prepareAndPlan(config, {
-    skipPrepare: options?.skipPrepare,
+    skipPrepare: options?.dryRun ? true : options?.skipPrepare,
     progress: options?.progress,
   })
 
@@ -208,8 +311,11 @@ export async function runBackup(
       linked: 0,
       copied: 0,
       pruned: 0,
+      pruneFailed: [],
+      pluginResults: [],
       plugins: plan.rows,
       changes: plan.changes,
+      skippedPaths: plan.skippedPaths,
       dryRun: true,
     }
   }
@@ -221,8 +327,11 @@ export async function runBackup(
     linked: result.linked,
     copied: result.copied,
     pruned: result.pruned,
+    pruneFailed: result.pruneFailed,
+    pluginResults: result.pluginResults,
     plugins: plan.rows,
     changes: plan.changes,
+    skippedPaths: plan.skippedPaths,
     dryRun: false,
   }
 }

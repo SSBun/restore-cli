@@ -1,4 +1,8 @@
-export type PluginPrepareHook = 'mac-apps-inventory'
+export type PluginPrepareHook =
+  | 'mac-apps-inventory'
+  | 'homebrew-brewfile'
+  | 'raycast-extensions'
+  | 'vscode-extensions-list'
 
 export interface PluginTool {
   name: string

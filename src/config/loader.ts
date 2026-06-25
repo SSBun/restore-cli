@@ -21,6 +21,28 @@ export function configExists(): boolean {
   return existsSync(CONFIG_PATH)
 }
 
+export type ConfigValidationResult = { ok: true; config: Config } | { ok: false; error: string }
+
+function parseConfigFile(): Config {
+  const raw = readFileSync(CONFIG_PATH, 'utf-8')
+  const parsed = JSON5.parse(raw)
+  return ConfigSchema.parse(parsed)
+}
+
+export function validateConfigFile(): ConfigValidationResult {
+  ensureConfigDir()
+
+  if (!configExists()) {
+    return { ok: false, error: `Config file not found: ${CONFIG_PATH}` }
+  }
+
+  try {
+    return { ok: true, config: parseConfigFile() }
+  } catch (err) {
+    return { ok: false, error: (err as Error).message }
+  }
+}
+
 export function loadConfig(): Config {
   ensureConfigDir()
 
@@ -29,9 +51,7 @@ export function loadConfig(): Config {
   }
 
   try {
-    const raw = readFileSync(CONFIG_PATH, 'utf-8')
-    const parsed = JSON5.parse(raw)
-    return ConfigSchema.parse(parsed)
+    return parseConfigFile()
   } catch (err) {
     console.error('Failed to load config, using defaults:', (err as Error).message)
     return getDefaultConfig()
