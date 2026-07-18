@@ -354,7 +354,82 @@ N/A（非迁移 task）。
 ### 19. Current Final Decision
 
 - **Decision**：`APPROVED`
-- **Rationale**：T1-T2 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，211 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
-- **Unresolved Items**：无 T1/T2 blocker；T3-T9 仍按 active plan 执行。
-- **Knowledge Synchronization**：T1-T2 均 zero-write；`Decision: no-reusable-lesson`。
-- **Resume / Next Action**：提交精确 T2 write set，然后自动开始 T3。
+- **Rationale**：T1-T3 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，239 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
+- **Unresolved Items**：无 T1-T3 blocker；T4-T9 仍按 active plan 执行。
+- **Knowledge Synchronization**：T1-T3 均 zero-write；`Decision: no-reusable-lesson`。
+- **Resume / Next Action**：提交精确 T3 write set，然后自动开始 T4。
+
+### 20. T3 验证、健康、保留与状态评审补充
+
+#### T3 摘要、边界与结果
+
+- **一句话结论**：T3 经两轮阻塞修复和最终窄复核后通过独立评审，当前无未解决 Critical / High / Medium finding。
+- **Before / After**：从仅有 legacy stat/prune，升级为严格 v1 structural/content verify、healthy/latest-healthy、确定性 14 healthy retention、Safety Point 保护钩子、单一认证快照 status 与稳定 CLI JSON/exit contract。
+- **Accepted Write Set**：`src/verify/**`、`src/engine/v1-retention.ts`、`src/engine/v1-stat.ts`、`src/cli/verify.ts`、`src/cli/status.ts`、`tests/verify/**`、`tests/retention/**`、`tests/status/**`、`tests/integration/status-command.test.ts`。
+- **非目标**：root CLI 统一注册由 T8；repair/salvage 不进入 1.0；staging/apply/rollback 由 T4；retention 不把 structural scope 冒充 content verify。
+
+#### T3 需求—实现—验证映射
+
+| Requirement / Success Criterion | Implementation | Verification | 状态 |
+|---|---|---|---|
+| FR-09 structural/content scopes 与 coverage | bounded discovery、strict manifest graph、auth/hash/length content read、non-vacuous coverage | corruption/missing/symlink/FIFO/auth/tamper tests | verified |
+| healthy/latest healthy | required/commit/structural/unlock contract；partial/failed 排除；creation-time content-readback evidence | latest/partial/mixed repository tests | verified |
+| FR-17 14 healthy retention | pure deterministic plan、last-healthy guard、Safety Point extra retention、dry-run parity、exclusive lock/drift fingerprint | 15-point、last healthy、Safety Point、drift、dry-run tests | verified |
+| 安全删除 | cwd-bound quarantine、macOS physical no-follow traversal、dev/ino handshakes、parent fsync、final absence validation | synchronized nested symlink race preserves outside/sibling | verified |
+| FR-18 coherent status | one borrowed authenticated repository snapshot、sanitized verifier issues、authoritative failure category、nullable untested write capabilities | verify-failure/malformed history/RPO/capability/mixed partial+malformed tests | verified |
+| FR-19 CLI automation | strict v1 config、single JSON result、stderr code、category exit；valid no-repository legacy fallback | malformed config、service failure、integrity exit 15、legacy integration | verified |
+
+#### T3 Findings 闭环与修复轮次
+
+| ID / Round | Severity | 问题簇 | 修复证据 | 最终状态 |
+|---|---|---|---|---|
+| T3-R1-1 | Critical | path-based recursive delete 可在目录竞态中越过 quarantine | bound cwd + `/usr/bin/find -P -x` physical traversal + identity/ack/fsync | fixed |
+| T3-R1-2 | High | malformed v1 config 静默 fallback 到 legacy/default status | `loadConfigStrict` + stable configuration JSON/exit 10 | fixed |
+| T3-R1-3-R1-7 | Medium | mixed snapshots、verify issue suppression、stale consent、duplicate metadata、vacuous coverage、write capability false claim | single snapshot、exact fingerprint/time、unique metadata、complete=false、nullable untested fields | fixed |
+| T3-R2-1 | Medium | failure state 仍从 leading partial issue 派生 category/exit | authenticated report category authoritative；matching integrity issue promoted | fixed |
+| Withdrawn | — | same-size post-publication corruption 应否改变 structural healthy | confirmed MRD 明确定义 structural/content 分层；保留现有契约 | no bug |
+
+| 轮次 | 结论 | 关键结果 | 验证 |
+|---|---|---|---|
+| R1 | BLOCKED | 1 Critical + 1 High + 5 Medium；删除竞态、status/validation/coverage 缺口 | 19 focused baseline |
+| R2 | BLOCKED | 七项关闭；发现 mixed partial+malformed failure category 错配 | 26 focused + typecheck |
+| R3 | APPROVED | authoritative failure category + primary issue/CLI exit 15；无 open C/H/M | 29 focused；239 full；status 9/9；typecheck/build/Biome |
+
+#### T3 自动化、风险、限制与 ReviewerContribution
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Focused | PASS | 29/29 T3 focused；final status 9/9 |
+| Full regression | PASS | 36 files / 239 tests |
+| Type / Build | PASS | `pnpm typecheck`；`pnpm build` |
+| Lint | PASS | direct Biome 111 files |
+| Diff / Ownership | PASS | `git diff --check`；仅 T3 owned code/tests + parent-owned plan/review |
+| Security | PASS | no shell interpolation；cwd-bound workers；bounded output/time；sanitized diagnostics；no raw paths/secrets |
+
+- **回滚**：revert T3 task commit；不得手工删除 repository recovery point 或 quarantine residue；retention 失败保持 degraded 并保留诊断。
+- **观测**：verify/status/retention 均输出 stable category、coverage/counts、next action；content failure 与 structural health 不混淆。
+- **Known limitation**：Node stdlib 无 `openat/unlinkat`；Apple Silicon/macOS 删除使用系统 physical traversal 并在已绑定 cwd、父目录身份和 fsync 边界内 fail closed。root command wiring 延后到 T8。
+- **Knowledge Impact**：none；本轮结论均为当前 MRD/plan/实现特定 hardening，没有独立 reusable lesson。
+
+| Reviewer | Role | Scope | Findings | Verification | Knowledge Impact |
+|---|---|---|---|---|---|
+| anvil-doer-t3 | implementation | T3 accepted write set | 关闭全部 finding | 29 focused / 239 full | none |
+| anvil-reviewer-t3 | independent adversarial review | verify/retention/status/CLI/races | R1-R2 BLOCKED；R3 APPROVED | 26 focused；final status 9/9 | none |
+| anvil-lead | final arbiter | spec adjudication、ownership、compound、task boundary | accepted | full/type/build/Biome/diff | none |
+
+#### T3 CompoundResultV2
+
+```text
+Action: submit
+Mode: apply
+Scope: T3 verification, health, retention and status
+Candidates: 0
+Active: 0
+Draft: 0
+Conflicts: 0
+Operations: 0
+Writes: 0
+Deletes: 0
+Validation: Collect pass (review-auto); Select no candidates because docs/anvil/knowledge is absent; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
+Decision: no-reusable-lesson
+```

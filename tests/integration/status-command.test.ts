@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerStatusCommand } from '../../src/cli/status.js'
 
 vi.mock('../../src/config/loader.js', () => ({
-  loadConfig: () => ({
+  loadConfigStrict: () => ({
     destination: { name: 'local', path: '/tmp/restore', type: 'local' },
     plugins: [],
     daemon: { intervalHours: 12 },

@@ -471,7 +471,7 @@ graph TD
 | --- | --- | --- |
 | T1 | completed | repository/protection foundation; 61 focused and 145 full tests pass; review APPROVED |
 | T2 | completed | source contract + verified v1 backup; 53 focused and 211 full tests pass; final review APPROVED |
-| T3 | pending | — |
+| T3 | completed | verify/retention/status closure; 29 focused and 239 full tests pass; final review APPROVED |
 | T4 | pending | — |
 | T5 | pending | — |
 | T6 | pending | — |
