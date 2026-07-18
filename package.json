@@ -1,6 +1,6 @@
 {
   "name": "@ssbun/restore-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CLI tool to back up important files to iCloud or other destinations",
   "type": "module",
   "bin": {

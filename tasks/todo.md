@@ -434,3 +434,44 @@
 - [x] 新增 VS Code extensions 清单生成逻辑和 prepare hook。
 - [x] 更新 `vscode-extensions` 插件定义和工具脚本。
 - [x] 补测试并运行验证。
+
+## TypeScript CLI SOP
+
+### 假设
+
+- 用户要创建可跨项目复用的 TypeScript CLI 开发 SOP，而不是修改当前项目源码。
+- SOP 参考本项目实际技术栈：`commander`、`@clack/prompts`、`json5`、`zod`、`vitest`、`biome`、`pnpm`。
+- 按 SOP manager 规则，用户级 SOP 写入 `~/.sops/typescript-cli.md`。
+
+### 计划
+
+- [x] 读取 SOP manager 规则。
+- [x] 检查当前项目的 `package.json`、README、TypeScript/Biome 配置。
+- [x] 创建 TypeScript CLI SOP。
+- [x] 验证 SOP frontmatter 和内容可读。
+
+### 结果
+
+- 已创建用户级 SOP：`~/.sops/typescript-cli.md`。
+- SOP 覆盖 TypeScript CLI 的命令契约、依赖选择、命令层边界、dry-run、测试、质量门禁和发布表面检查。
+- 验证通过：用 Node 检查 frontmatter 包含 `name`、`description`、`version`、`owner`，并完整读取 SOP 内容。
+
+## 个人 CLI 工具 wiki
+
+### 假设
+
+- wiki 放在当前项目的 `docs/cli-tools.md`，作为以后集中记录个人 CLI 工具的入口。
+- 第一条只记录当前 `restore-cli`，不扩展成复杂目录或模板系统。
+- Git 地址以当前仓库 remote 为准；npm 地址以已发布 npm 包为准。
+
+### 计划
+
+- [x] 检查当前仓库 Git remote、npm 包名和已暴露 CLI 命令。
+- [x] 创建个人 CLI 工具 wiki。
+- [x] 验证文档内容包含 Git 地址、npm 地址和基础功能。
+
+### 结果
+
+- 已创建 `docs/cli-tools.md`，作为个人 CLI 工具 wiki。
+- 第一条记录为 `restore-cli`，包含 Git 地址、GitHub 地址、npm 地址、安装方式、基础命令、基础功能和备注。
+- 验证通过：`rg` 检索到 Git 地址、npm 地址、当前发布版本和核心命令。
