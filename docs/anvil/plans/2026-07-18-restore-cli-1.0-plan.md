@@ -362,9 +362,9 @@ graph TD
 - **Parallel Group**：G4
 - **Execution**：serial
 - **Parallel Blocker**：共享 metadata codec、health selection 和 CLI recovery contract
-- **Ownership**：`src/recovery/**`、`src/cli/restore.ts`、`src/cli/apply.ts`、恢复相关测试
+- **Ownership**：`src/recovery/**`、`src/cli/restore.ts`、`src/cli/apply.ts`、恢复相关测试、`package.json`（仅测试超时预算）
 - **Read Set**：T1-T3、现有 restore/path helpers
-- **Write Set**：`src/recovery/**`、`src/cli/restore.ts`、`src/cli/apply.ts`、恢复相关测试
+- **Write Set**：`src/recovery/**`、`src/cli/restore.ts`、`src/cli/apply.ts`、恢复相关测试、`package.json`（仅测试超时预算）
 - **描述**：point browse/selection、default staging、逐文件认证读取和原子发布、metadata restore/verify、conflict plan、Safety Point、explicit apply、retry 与 rollback。
 - **成功标准**：默认不写原路径；大文件/metadata/apply 中断无截断成功；无 implicit delete；Safety Point 可 rollback；结果分类完整。
 - **验证**：recovery fault tests、现有 backup-restore integration、typecheck/lint/build。
@@ -472,8 +472,8 @@ graph TD
 | T1 | completed | repository/protection foundation; 61 focused and 145 full tests pass; review APPROVED |
 | T2 | completed | source contract + verified v1 backup; 53 focused and 211 full tests pass; final review APPROVED |
 | T3 | completed | verify/retention/status closure; 29 focused and 239 full tests pass; final review APPROVED |
-| T4 | pending | — |
-| T5 | pending | — |
+| T4 | completed | staging/apply/rollback closure; 58 recovery and 297 total tests pass; final review APPROVED |
+| T5 | in progress | legacy read/copy-migration implementation starting |
 | T6 | pending | — |
 | T7 | pending | — |
 | T8 | pending | — |

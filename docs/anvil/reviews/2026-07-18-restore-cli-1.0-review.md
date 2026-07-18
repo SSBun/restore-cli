@@ -4,21 +4,21 @@
 
 | 字段 | 值 |
 |---|---|
-| MR / Commit | T1 `87ef202`；T2 accepted working tree，task commit pending |
+| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 accepted working tree，task commit pending |
 | Author | anvil-doer / anvil-lead |
 | Review Date | 2026-07-18 |
 | Review Writer | anvil-lead |
-| Status | `APPROVED`（T1-T2 accepted write sets；完整 1.0 MR 仍 active） |
+| Status | `APPROVED`（T1-T4 accepted write sets；完整 1.0 MR 仍 active） |
 
 ## 第一层：3 分钟读懂
 
 ### 1. Review 摘要
 
-- **一句话结论**：T1 仓库/保护基础与 T2 来源/可验证备份均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
+- **一句话结论**：T1-T4（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback）均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
 - **为什么现在要改**：1.0 的备份、验证、恢复和调度都依赖同一个仓库身份、认证加密、锁和操作结果契约；基础错误会向所有后续任务扩散。
-- **交付结果**：除 v1 repository/protection 外，新增 declarative source、严格 JSON plugin、metadata-faithful capture、contract-bound plaintext consent、verified pending point 与 cwd-bound atomic publication。
-- **主要影响**：T1-T2 accepted write sets；CLI root wiring、health/retention、restore/migration/scheduler 仍由 T3-T9 完成。
-- **Reviewer Action**：先看 T1 auth/identity/lock，再看 T2 `capture.ts` consistency、`stable-read.ts` metadata worker 与 `v1-backup.ts` publication/result boundary。
+- **交付结果**：除 v1 repository/protection 与 declarative verified backup 外，新增 structural/content verify、healthy retention/status，以及 authenticated staging、reviewed apply、Safety Point、retry/rollback state machine。
+- **主要影响**：T1-T4 accepted write sets；legacy migration、新 Mac plan、scheduler、root CLI/package/release hardening 仍由 T5-T9 完成。
+- **Reviewer Action**：先看 T4 authenticated intent/lifecycle，再看 apply/rollback preflight、Safety lease、atomic workers 与 metadata identity cutoff；T1-T3 细节见各任务补充。
 
 ### 2. 背景与目标
 
@@ -354,10 +354,10 @@ N/A（非迁移 task）。
 ### 19. Current Final Decision
 
 - **Decision**：`APPROVED`
-- **Rationale**：T1-T3 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，239 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
-- **Unresolved Items**：无 T1-T3 blocker；T4-T9 仍按 active plan 执行。
-- **Knowledge Synchronization**：T1-T3 均 zero-write；`Decision: no-reusable-lesson`。
-- **Resume / Next Action**：提交精确 T3 write set，然后自动开始 T4。
+- **Rationale**：T1-T4 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，297 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
+- **Unresolved Items**：无 T1-T4 blocker；T5-T9 仍按 active plan 执行。
+- **Knowledge Synchronization**：T1-T4 均 zero-write；`Decision: no-reusable-lesson`。
+- **Resume / Next Action**：提交精确 T4 write set，然后自动开始 T5。
 
 ### 20. T3 验证、健康、保留与状态评审补充
 
@@ -431,5 +431,74 @@ Operations: 0
 Writes: 0
 Deletes: 0
 Validation: Collect pass (review-auto); Select no candidates because docs/anvil/knowledge is absent; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
+Decision: no-reusable-lesson
+```
+
+### 21. T4 staging、apply 与 rollback 评审补充
+
+#### T4 摘要、边界与结果
+
+- **一句话结论**：T4 经八轮独立对抗复核后通过终审，当前无未解决 Critical / High / Medium finding。
+- **Before / After**：从 legacy 原路径直接 restore，升级为认证 point selection、确定性 staging、reviewed plan fingerprint、默认 dry-run、显式 apply、Safety Point、durable journal、可恢复 retry 与显式 rollback。
+- **Accepted Write Set**：`src/recovery/**`、`src/cli/restore.ts`、`src/cli/apply.ts`、`tests/recovery/**`、`package.json` 的 Vitest timeout 预算，以及 parent-owned plan/review 状态。
+- **非目标**：T4 命令暂不 root-wire；legacy copy migration 由 T5；新 Mac app inventory/recovery plan 由 T6；统一 CLI/package/docs 由 T8。
+
+#### T4 需求—实现—验证映射
+
+| Requirement / Success Criterion | Implementation | Verification | 状态 |
+|---|---|---|---|
+| 默认不写原路径 | authenticated point browse/selection + deterministic staging；apply/rollback 默认 dry-run | CLI contract、staging immutability tests | verified |
+| reviewed destructive set | target/status/full expected identity、external parent、policy 进入 fingerprint/applyId 与 authenticated Safety intent | dry-run identity、parent ABA、pending/unchanged drift tests | verified |
+| Safety Point 与 crash resume | intent → verified blobs → final manifest → protection；strict lifecycle child set；durable apply/rollback journals | pre-manifest、post-manifest/pre-protection、post-Safety、lost-ack tests | verified |
+| 原子 apply 与 rollback | cwd/fd-bound file/symlink/hardlink/directory workers；preflight callbacks；per-entry identity checks | target/ancestor ABA、cross-blob corruption、directory ack tests | verified |
+| metadata fidelity | whole-entry inode binding；portable/native cutoff；directory ancestor promotion；xattrs/flags explicit loss | two-xattr、portable→flags、fd-bound race、directory timestamp rollback | verified |
+| bounded complexity | Safety lease 固定 4 FD、bounded full phases、Map O(1) artifact lookup、逐 entry blob 检查 | 16-file passive-metrics scale regression | verified |
+| secret-safe failure | strict authenticated schemas、generic residue diagnostics、no secret paths/entry IDs | malformed/tamper/wrong-AAD tests | verified |
+
+#### T4 Findings 闭环与修复轮次
+
+| Round | 主要 finding | 修复结果 | 结论 |
+|---|---|---|---|
+| R1-R3 | encrypted Safety retry、descriptor auth、hardlink resume、directory/metadata ABA、mapping parent、lost ack、error category | canonical descriptor binding、durable expectations、fd-bound mutation、external-parent binding、structured publication outcomes | BLOCKED 后全部 fixed |
+| R4-R5 | plan expected/status 未绑定、rollback tombstone、unchanged/pending TOCTOU、directory promotion、incomplete Safety adoption | authenticated planItems、contextual tombstone、final unchanged checks、ancestor promotion、strict intent design | BLOCKED 后全部 fixed |
+| R6-R7 | final lifecycle exactness、no-journal semantic validation、implicit intent resume、Safety-root TOCTOU、intent auth、lease O(N²)/FD pressure | exact lifecycle、explicit applyId resume、full before-state checks、preflight callbacks、bounded lease | BLOCKED 后全部 fixed |
+| R8 | executable observer 可重开跨 blob race；linear scan 仍为 O(N²) | 移除 public callback；passive metrics；`artifactByName` Map | **APPROVED** |
+
+#### T4 自动化、风险与 ReviewerContribution
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Recovery | PASS | 49 recovery service + 9 recovery CLI = 58/58 |
+| Full regression | PASS | 297/297；non-recovery 239/239 |
+| Type / Build | PASS | `pnpm typecheck`；`pnpm build` |
+| Lint / Diff | PASS | direct Biome 121 files；`git diff --check` |
+| Complexity / FD | PASS | fixed 4 held FDs；constant control reads；linear Map probes |
+| Security | PASS | exact authenticated intent/manifest/AAD；zero-mutation corruption preflight；secret-safe issues |
+
+- **回滚**：revert T4 task commit；不得手工删除 active Safety Point、journal 或 incomplete intent residue；使用同一显式 apply ID retry，或显式 rollback。
+- **观测**：apply/rollback 结果稳定区分 destination、integrity、configuration、partial；ambiguous publication 给出人工检查与同 ID retry 指引。
+- **Known limitation**：同 UID 的任意非协作恶意进程不属于可完全阻止的 filesystem threat；生产路径通过无 callback commit、原子 worker、严格 preflight/identity checkpoint fail closed。creation time 和 symlink native metadata 无安全 object-bound 路径时显式 fidelity loss。
+- **Knowledge Impact**：none；本轮结论均为当前 recovery state machine 的实现特定 hardening，zero-write compound。
+
+| Reviewer | Role | Scope | Findings | Verification | Knowledge Impact |
+|---|---|---|---|---|---|
+| anvil-doer-t4 | implementation | T4 accepted write set | 关闭全部 finding | 58 recovery / 297 full | none |
+| anvil-reviewer-t4 | independent adversarial review | Safety、apply/rollback、TOCTOU、metadata、complexity | R1-R7 BLOCKED；R8 APPROVED | 49 focused + type/Biome | none |
+| anvil-lead | final arbiter | plan trace、ownership、compound、task boundary | accepted | full/type/build/Biome/diff | none |
+
+#### T4 CompoundResultV2
+
+```text
+Action: submit
+Mode: apply
+Scope: T4 recovery staging, apply and rollback
+Candidates: 0
+Active: 0
+Draft: 0
+Conflicts: 0
+Operations: 0
+Writes: 0
+Deletes: 0
+Validation: Collect pass (review-auto); Select no candidates because no knowledge root exists; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
 Decision: no-reusable-lesson
 ```
