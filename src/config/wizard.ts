@@ -3,8 +3,8 @@ import { homedir } from 'node:os'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
 import { getBuiltinPlugins } from '../plugin/registry.js'
-import { configExists, loadConfig, writeConfig } from './loader.js'
-import type { Destination } from './types.js'
+import { configExists, loadConfig, prunePlaintextSecretAcceptances, writeConfig } from './loader.js'
+import type { Config, Destination } from './types.js'
 
 interface PluginInfo {
   name: string
@@ -146,13 +146,17 @@ function saveConfig(
   destination: Destination,
   settings: { interval: number; maxSnapshots: number },
   plugins: string[],
+  retained: Pick<Config, 'repository' | 'plaintextSecretAcceptances'> = {},
 ): void {
-  writeConfig({
+  const nextConfig: Config = {
     destination,
+    ...(retained.repository ? { repository: retained.repository } : {}),
     plugins,
+    plaintextSecretAcceptances: retained.plaintextSecretAcceptances ?? [],
     daemon: { intervalHours: settings.interval },
     maxSnapshots: settings.maxSnapshots,
-  })
+  }
+  writeConfig(prunePlaintextSecretAcceptances(nextConfig))
 }
 
 export async function runWizard(): Promise<void> {
@@ -220,7 +224,7 @@ export async function runWizard(): Promise<void> {
 
     if (action === 'save-exit') {
       if (dirty) {
-        saveConfig(destination, settings, plugins)
+        saveConfig(destination, settings, plugins, config)
         p.outro('Configuration updated!')
       }
       return

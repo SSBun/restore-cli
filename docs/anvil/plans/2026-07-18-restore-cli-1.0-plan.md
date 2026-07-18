@@ -470,7 +470,7 @@ graph TD
 | Task | Status | Evidence |
 | --- | --- | --- |
 | T1 | completed | repository/protection foundation; 61 focused and 145 full tests pass; review APPROVED |
-| T2 | pending | — |
+| T2 | completed | source contract + verified v1 backup; 53 focused and 211 full tests pass; final review APPROVED |
 | T3 | pending | — |
 | T4 | pending | — |
 | T5 | pending | — |

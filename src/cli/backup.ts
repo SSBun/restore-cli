@@ -1,149 +1,122 @@
 import type { Command } from 'commander'
-import { loadConfig } from '../config/loader.js'
-import { executeBackupPlan, prepareAndPlan } from '../engine/run-backup.js'
-import { error, isVerbose } from '../util/log.js'
-import { getBackupRoot } from '../util/path.js'
-import {
-  formatBackupFooter,
-  formatBackupHeader,
-  formatChangedPlugins,
-  formatChangesList,
-  formatDryRunFooter,
-  formatPlanSummary,
-  formatPluginPhaseDone,
-  formatPluginPhaseStart,
-  formatPluginTable,
-  formatSkippedPaths,
-  formatSkippedSummary,
-  formatStageDone,
-  formatSyncFile,
-  formatSyncResult,
-  formatSyncStart,
-} from './backup-format.js'
+import { displayCaptureScope } from '../catalog/index.js'
+import { loadConfigStrict, resolveBackupConfiguration } from '../config/loader.js'
+import type { ResolvedBackupConfiguration } from '../config/loader.js'
+import { createV1RecoveryPoint } from '../engine/v1-backup.js'
+import { preparePlugins } from '../plugin/prepare.js'
+import { MacOsKeychainCredentialProvider } from '../protection/index.js'
+import type { CredentialProvider } from '../protection/index.js'
+import { createOperationResult } from '../repository/index.js'
+import type { OperationCategory, OperationResult } from '../repository/index.js'
 
-function printLines(lines: string[]): void {
-  for (const line of lines) {
-    console.log(line)
-  }
+const EXIT_CODES: Record<OperationCategory, number> = {
+  success: 0,
+  warning: 2,
+  partial: 3,
+  configuration: 10,
+  authentication: 11,
+  lock: 12,
+  source: 13,
+  destination: 14,
+  integrity: 15,
+  unsupported: 16,
+  cancelled: 17,
+  internal: 20,
 }
 
-export function registerBackupCommand(program: Command): void {
+function cliFailure(
+  category: 'configuration' | 'internal',
+  startedAt: string,
+  repositoryId?: string,
+): OperationResult {
+  const code =
+    category === 'configuration' ? 'BACKUP_CONFIGURATION_INVALID' : 'BACKUP_SERVICE_FAILED'
+  const message =
+    category === 'configuration'
+      ? 'Backup configuration could not be resolved safely'
+      : 'Backup service did not produce a result'
+  return createOperationResult({
+    operation: 'backup',
+    state: 'failure',
+    category,
+    ...(repositoryId ? { repositoryId } : {}),
+    startedAt,
+    endedAt: new Date().toISOString(),
+    issues: [{ code, category, message }],
+  })
+}
+
+export interface BackupCommandDependencies {
+  resolveConfiguration(): ResolvedBackupConfiguration
+  createRecoveryPoint: typeof createV1RecoveryPoint
+  prepare: typeof preparePlugins
+  credentialProvider(): CredentialProvider
+  writeStdout(value: string): void
+  writeStderr(value: string): void
+  setExitCode(value: number): void
+}
+
+const DEFAULT_DEPENDENCIES: BackupCommandDependencies = {
+  resolveConfiguration: () => resolveBackupConfiguration(loadConfigStrict()),
+  createRecoveryPoint: createV1RecoveryPoint,
+  prepare: preparePlugins,
+  credentialProvider: () => new MacOsKeychainCredentialProvider(),
+  writeStdout: (value) => console.log(value),
+  writeStderr: (value) => console.error(value),
+  setExitCode: (value) => {
+    process.exitCode = value
+  },
+}
+
+export function registerBackupCommand(
+  program: Command,
+  overrides: Partial<BackupCommandDependencies> = {},
+): void {
+  const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
   program
     .command('backup')
-    .description('Run backup to the configured destination')
-    .option('--dry-run', 'Show what would be backed up without copying')
-    .option('--verbose', 'Print detailed backup logs')
-    .action(async (options) => {
-      const config = loadConfig()
-      const backupRoot = getBackupRoot(config.destination.path)
-      const verbose = Boolean(options.verbose) || isVerbose()
-
+    .description('Create a verified v1 recovery point')
+    .option('--dry-run', 'Resolve and capture the same source plan without repository writes')
+    .option('--point-id <id>', 'Explicit stable recovery point ID')
+    .action(async (options: { dryRun?: boolean; pointId?: string }) => {
+      const startedAt = new Date().toISOString()
+      let phase: 'configuration' | 'internal' = 'configuration'
+      let repositoryId: string | undefined
       try {
-        printLines(formatBackupHeader(config.destination.name, backupRoot))
+        const resolved = dependencies.resolveConfiguration()
+        if (!resolved.config.repository) {
+          throw new Error('repository configuration missing')
+        }
+        repositoryId = resolved.config.repository.id
+        if (resolved.plugins.length === 0) throw new Error('no enabled plugins')
+        for (const line of displayCaptureScope(resolved.plan)) dependencies.writeStderr(line)
+        if (resolved.config.repository.protection === 'plaintext') {
+          dependencies.writeStderr('INSECURE: repository content and metadata are not encrypted')
+        }
 
-        let printedPrepareHeader = false
-        let printedAnalyzeHeader = false
-        let preparedInventories = 0
-        const plan = await prepareAndPlan(config, {
-          skipPrepare: Boolean(options.dryRun),
-          progress: {
-            onPrepareStart: (pluginName, current, total) => {
-              if (verbose && !printedPrepareHeader) {
-                console.log('Preparing plugin inventories:')
-                printedPrepareHeader = true
-              }
-              if (verbose) {
-                console.log(formatPluginPhaseStart(pluginName, current, total))
-              }
-            },
-            onPrepareDone: (pluginName, current, total) => {
-              if (verbose) {
-                console.log(formatPluginPhaseDone(pluginName, current, total))
-              } else if (current === total) {
-                preparedInventories = total
-              }
-            },
-            onAnalyzeStart: (pluginName, current, total) => {
-              if (verbose && !printedAnalyzeHeader) {
-                if (printedPrepareHeader) console.log('')
-                console.log('Analyzing plugins:')
-                printedAnalyzeHeader = true
-              }
-              if (verbose) {
-                console.log(formatPluginPhaseStart(pluginName, current, total))
-              }
-            },
-          },
+        phase = 'internal'
+        const result = await dependencies.createRecoveryPoint({
+          repositoryPath: resolved.repositoryPath,
+          expectedRepositoryId: resolved.config.repository.id,
+          expectedProtection: resolved.config.repository.protection,
+          ...(resolved.config.repository.protection === 'encrypted'
+            ? { credentialProvider: dependencies.credentialProvider() }
+            : {}),
+          plan: resolved.plan,
+          plaintextSecretAcceptances: resolved.config.plaintextSecretAcceptances,
+          ...(options.pointId ? { pointId: options.pointId } : {}),
+          dryRun: Boolean(options.dryRun),
+          ...(!options.dryRun
+            ? { beforeCapture: async () => dependencies.prepare(resolved.plugins) }
+            : {}),
         })
-
-        if (printedAnalyzeHeader) console.log('')
-
-        if (!verbose) {
-          console.log(
-            formatStageDone(1, 4, 'Preparing inventories', `${preparedInventories} generated`),
-          )
-          console.log(formatStageDone(2, 4, 'Analyzing plugins', `${plan.rows.length} scanned`))
-        }
-
-        if (verbose || options.dryRun) {
-          printLines([
-            ...formatPluginTable(plan.rows),
-            ...formatChangesList(plan.changes),
-            ...formatSkippedPaths(plan.skippedPaths),
-          ])
-        } else {
-          printLines(formatPlanSummary(plan.rows, plan.changes, plan.skippedPaths))
-        }
-
-        if (options.dryRun) {
-          printLines(formatDryRunFooter())
-          return
-        }
-
-        if (verbose) {
-          console.log('')
-          console.log('Syncing plugins:')
-        }
-        const result = await executeBackupPlan(plan, config.maxSnapshots, {
-          onSyncStart: (pluginName, _completed, _total, fileTotal) => {
-            if (verbose) {
-              console.log(formatSyncStart(pluginName, fileTotal))
-            }
-          },
-          onSyncFile: (event) => {
-            if (verbose) {
-              console.log(formatSyncFile(event))
-            }
-          },
-        })
-
-        if (verbose) {
-          printLines(formatSyncResult(result.pluginResults))
-        } else {
-          console.log(
-            formatStageDone(
-              3,
-              4,
-              'Syncing snapshot',
-              `${result.linked} linked, ${result.copied} copied`,
-            ),
-          )
-          console.log(formatStageDone(4, 4, 'Pruning snapshots', `${result.pruned} removed`))
-          printLines(formatChangedPlugins(plan.rows, result.pluginResults))
-          printLines(formatSkippedSummary(plan.skippedPaths.length))
-        }
-        printLines(
-          formatBackupFooter(
-            result.snapshotName,
-            result.linked,
-            result.copied,
-            result.pruned,
-            result.pruneFailed.length,
-          ),
-        )
-      } catch (err) {
-        error((err as Error).message)
-        process.exit(1)
+        dependencies.writeStdout(JSON.stringify(result))
+        dependencies.setExitCode(EXIT_CODES[result.category])
+      } catch {
+        const result = cliFailure(phase, startedAt, repositoryId)
+        dependencies.writeStderr(`backup: ${result.issues[0]?.code ?? 'BACKUP_SERVICE_FAILED'}`)
+        dependencies.writeStdout(JSON.stringify(result))
+        dependencies.setExitCode(EXIT_CODES[result.category])
       }
     })
 }

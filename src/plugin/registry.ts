@@ -1,23 +1,78 @@
-import type { PluginManifest } from './types.js'
+import type {
+  ExpectedEntryType,
+  PluginManifest,
+  ResolvedPluginManifest,
+  SourceRequirement,
+  SourceSensitivity,
+  SourceSpec,
+} from './types.js'
 
-const builtinPlugins: PluginManifest[] = [
-  {
+function source(
+  name: string,
+  path: string,
+  options: {
+    requirement?: SourceRequirement
+    sensitivity?: SourceSensitivity
+    expectedType?: ExpectedEntryType
+    recoveryScope?: string
+    consistencyGroup?: string
+    includeEmptyDirectories?: boolean
+  } = {},
+): SourceSpec {
+  return {
+    name,
+    path,
+    requirement: options.requirement ?? 'optional',
+    sensitivity: options.sensitivity ?? 'private',
+    expectedType: options.expectedType ?? 'any',
+    recoveryScope: options.recoveryScope ?? 'exact',
+    ...(options.consistencyGroup ? { consistencyGroup: options.consistencyGroup } : {}),
+    ...(options.includeEmptyDirectories === undefined
+      ? {}
+      : { includeEmptyDirectories: options.includeEmptyDirectories }),
+  }
+}
+
+function builtin(plugin: Omit<ResolvedPluginManifest, 'paths'>): ResolvedPluginManifest {
+  return { ...plugin, paths: plugin.sources.map((item) => item.path) }
+}
+
+const builtinPlugins: ResolvedPluginManifest[] = [
+  builtin({
     name: 'restore-cli',
     description: 'restore-cli configuration file',
-    paths: ['~/.config/restore/config.json5'],
-  },
-  {
+    sources: [
+      source('config', '~/.config/restore/config.json5', {
+        requirement: 'required',
+        expectedType: 'file',
+      }),
+    ],
+  }),
+  builtin({
     name: 'vscode',
     description: 'VS Code settings and keybindings',
-    paths: [
-      '~/Library/Application Support/Code/User/settings.json',
-      '~/Library/Application Support/Code/User/keybindings.json',
+    sources: [
+      source('settings', '~/Library/Application Support/Code/User/settings.json', {
+        expectedType: 'file',
+        consistencyGroup: 'vscode-user',
+      }),
+      source('keybindings', '~/Library/Application Support/Code/User/keybindings.json', {
+        expectedType: 'file',
+        consistencyGroup: 'vscode-user',
+      }),
     ],
-  },
-  {
+  }),
+  builtin({
     name: 'vscode-extensions',
     description: 'VS Code installed extensions inventory',
-    paths: ['~/.config/restore/inventory/vscode-extensions.txt'],
+    sources: [
+      source('extensions', '~/.config/restore/inventory/vscode-extensions.txt', {
+        requirement: 'required',
+        sensitivity: 'public',
+        expectedType: 'file',
+        recoveryScope: 'inventory',
+      }),
+    ],
     prepare: 'vscode-extensions-list',
     tools: [
       {
@@ -31,31 +86,53 @@ const builtinPlugins: PluginManifest[] = [
         script: 'show.sh',
       },
     ],
-  },
-  {
+  }),
+  builtin({
     name: 'dotfiles',
     description: 'Shell dotfiles (.zshrc, .bashrc, .gitconfig)',
-    paths: ['~/.zshrc', '~/.bashrc', '~/.bash_profile', '~/.gitconfig', '~/.gitignore_global'],
-  },
-  {
+    sources: [
+      source('zshrc', '~/.zshrc', { expectedType: 'file' }),
+      source('bashrc', '~/.bashrc', { expectedType: 'file' }),
+      source('bash-profile', '~/.bash_profile', { expectedType: 'file' }),
+      source('gitconfig', '~/.gitconfig', { expectedType: 'file' }),
+      source('gitignore-global', '~/.gitignore_global', { expectedType: 'file' }),
+    ],
+  }),
+  builtin({
     name: 'ssh',
     description: 'SSH config and keys',
-    paths: ['~/.ssh/config'],
-  },
-  {
+    sources: [source('config', '~/.ssh/config', { sensitivity: 'secret', expectedType: 'file' })],
+  }),
+  builtin({
     name: 'sops',
     description: 'SOPS configuration and local key material',
-    paths: ['~/.sops'],
-  },
-  {
+    sources: [
+      source('configuration', '~/.sops', {
+        sensitivity: 'secret',
+        expectedType: 'directory',
+        includeEmptyDirectories: true,
+      }),
+    ],
+  }),
+  builtin({
     name: 'zsh',
     description: 'Zsh configuration',
-    paths: ['~/.zshrc', '~/.zshenv', '~/.zprofile'],
-  },
-  {
+    sources: [
+      source('zshrc', '~/.zshrc', { expectedType: 'file', consistencyGroup: 'zsh' }),
+      source('zshenv', '~/.zshenv', { expectedType: 'file', consistencyGroup: 'zsh' }),
+      source('zprofile', '~/.zprofile', { expectedType: 'file', consistencyGroup: 'zsh' }),
+    ],
+  }),
+  builtin({
     name: 'git',
     description: 'Git configuration',
-    paths: ['~/.gitconfig', '~/.gitignore_global'],
+    sources: [
+      source('config', '~/.gitconfig', { expectedType: 'file', consistencyGroup: 'git' }),
+      source('ignore-global', '~/.gitignore_global', {
+        expectedType: 'file',
+        consistencyGroup: 'git',
+      }),
+    ],
     tools: [
       {
         name: 'show-config',
@@ -63,21 +140,38 @@ const builtinPlugins: PluginManifest[] = [
         script: 'show-config.sh',
       },
     ],
-  },
-  {
+  }),
+  builtin({
     name: 'iterm2',
     description: 'iTerm2 preferences',
-    paths: ['~/Library/Preferences/com.googlecode.iterm2.plist'],
-  },
-  {
+    sources: [
+      source('preferences', '~/Library/Preferences/com.googlecode.iterm2.plist', {
+        expectedType: 'file',
+      }),
+    ],
+  }),
+  builtin({
     name: 'vim',
     description: 'Vim/Neovim configuration',
-    paths: ['~/.vimrc', '~/.config/nvim'],
-  },
-  {
+    sources: [
+      source('vimrc', '~/.vimrc', { expectedType: 'file' }),
+      source('neovim', '~/.config/nvim', {
+        expectedType: 'directory',
+        includeEmptyDirectories: true,
+      }),
+    ],
+  }),
+  builtin({
     name: 'homebrew',
     description: 'Homebrew Brewfile inventory for new-Mac package restore',
-    paths: ['~/.config/restore/inventory/Brewfile'],
+    sources: [
+      source('brewfile', '~/.config/restore/inventory/Brewfile', {
+        requirement: 'required',
+        sensitivity: 'public',
+        expectedType: 'file',
+        recoveryScope: 'inventory',
+      }),
+    ],
     prepare: 'homebrew-brewfile',
     tools: [
       {
@@ -91,20 +185,36 @@ const builtinPlugins: PluginManifest[] = [
         script: 'show.sh',
       },
     ],
-  },
-  {
+  }),
+  builtin({
     name: 'raycast',
     description: 'Raycast extension inventory and preferences',
-    paths: [
-      '~/.config/restore/inventory/raycast-extensions.json',
-      '~/Library/Preferences/com.raycast.macos.plist',
+    sources: [
+      source('extensions', '~/.config/restore/inventory/raycast-extensions.json', {
+        requirement: 'required',
+        sensitivity: 'public',
+        expectedType: 'file',
+        recoveryScope: 'inventory',
+        consistencyGroup: 'raycast',
+      }),
+      source('preferences', '~/Library/Preferences/com.raycast.macos.plist', {
+        expectedType: 'file',
+        consistencyGroup: 'raycast',
+      }),
     ],
     prepare: 'raycast-extensions',
-  },
-  {
+  }),
+  builtin({
     name: 'mac-apps',
     description: 'Installed Mac app inventory (JSON manifest for new-Mac recovery)',
-    paths: ['~/.config/restore/inventory/mac-apps.json'],
+    sources: [
+      source('applications', '~/.config/restore/inventory/mac-apps.json', {
+        requirement: 'required',
+        sensitivity: 'public',
+        expectedType: 'file',
+        recoveryScope: 'inventory',
+      }),
+    ],
     prepare: 'mac-apps-inventory',
     tools: [
       {
@@ -128,7 +238,7 @@ const builtinPlugins: PluginManifest[] = [
         script: 'open-inventory.sh',
       },
     ],
-  },
+  }),
 ]
 
 export function getBuiltinPlugins(): PluginManifest[] {

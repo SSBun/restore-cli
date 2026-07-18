@@ -4,21 +4,21 @@
 
 | 字段 | 值 |
 |---|---|
-| MR / Commit | T1 accepted working tree；task commit pending |
+| MR / Commit | T1 `87ef202`；T2 accepted working tree，task commit pending |
 | Author | anvil-doer / anvil-lead |
 | Review Date | 2026-07-18 |
 | Review Writer | anvil-lead |
-| Status | `APPROVED`（T1 accepted write set；完整 1.0 MR 仍 active） |
+| Status | `APPROVED`（T1-T2 accepted write sets；完整 1.0 MR 仍 active） |
 
 ## 第一层：3 分钟读懂
 
 ### 1. Review 摘要
 
-- **一句话结论**：T1 仓库与保护基础在三轮对抗修复后通过，当前无未解决 Critical / High / Medium finding。
+- **一句话结论**：T1 仓库/保护基础与 T2 来源/可验证备份均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
 - **为什么现在要改**：1.0 的备份、验证、恢复和调度都依赖同一个仓库身份、认证加密、锁和操作结果契约；基础错误会向所有后续任务扩散。
-- **交付结果**：新增 v1 repository、稳定卷/共享身份、target preflight、认证写会话、AES-256-GCM、Keychain/recovery credential、durable publish、凭据轮换/撤销、跨进程锁和安全有界历史。
-- **主要影响**：仅新增 `src/repository/**`、`src/protection/**`、`src/cli/repository.ts` 与 `tests/repository/**`；CLI root wiring 留给 T8。
-- **Reviewer Action**：优先检查 `repository.ts` 的 auth-before-write、`lock.ts` 的 parent quarantine、`target.ts` 的 stable identity、`credentials.ts` 的 commit/cleanup outcome。
+- **交付结果**：除 v1 repository/protection 外，新增 declarative source、严格 JSON plugin、metadata-faithful capture、contract-bound plaintext consent、verified pending point 与 cwd-bound atomic publication。
+- **主要影响**：T1-T2 accepted write sets；CLI root wiring、health/retention、restore/migration/scheduler 仍由 T3-T9 完成。
+- **Reviewer Action**：先看 T1 auth/identity/lock，再看 T2 `capture.ts` consistency、`stable-read.ts` metadata worker 与 `v1-backup.ts` publication/result boundary。
 
 ### 2. 背景与目标
 
@@ -245,6 +245,23 @@ Decision: no-reusable-lesson
 - **Unrelated Conflicts Reported**：0。
 - **Relevant Conflict Resolution**：N/A。
 
+#### T2 CompoundResultV2
+
+```text
+Action: submit
+Mode: apply
+Scope: T2 source contract and verified v1 backup
+Candidates: 0
+Active: 0
+Draft: 0
+Conflicts: 0
+Operations: 0
+Writes: 0
+Deletes: 0
+Validation: Collect pass (review-auto); Select no candidates because docs/anvil/knowledge is absent; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
+Decision: no-reusable-lesson
+```
+
 ### 16. MigrationDisposition
 
 N/A（非迁移 task）。
@@ -268,10 +285,76 @@ N/A（非迁移 task）。
 | Source of truth、验证证据、恢复点完整 | PASS | MRD/plan/tests/task commit boundary |
 | 本 MR 只有一个 human-facing review 文档 | PASS | this file |
 
-### 18. Final Decision
+### 18. T2 来源契约与可验证备份评审补充
+
+#### T2 摘要、边界与结果
+
+- **一句话结论**：T2 在四轮阻塞修复后通过最终独立复核，当前无未解决 Critical / High / Medium finding。
+- **Before / After**：从内置 `paths` + legacy snapshot 写入，升级为统一 declarative source contract、严格用户 JSON plugin、稳定 no-follow capture、受保护 `.pending` recovery point、内容读回验证和目录绑定原子 publish。
+- **Accepted Write Set**：`src/catalog/**`、`src/plugin/**`、`src/config/**`、`src/engine/v1-backup.ts`、`src/cli/backup.ts`、`tests/backup/**`、`tests/integration/plugin.test.ts`；共 23 个 owned source/test files。
+- **非目标**：恢复点 health/retention/list 由 T3；staging/apply/rollback 由 T4；legacy migration 由 T5；root CLI/package wiring 由 T8。
+- **兼容性**：旧 plugin `paths` 自动映射为 `optional/private`；legacy backup reader/engine 保留；新写入仅使用 v1 verified point。
+
+#### T2 需求—实现—验证映射
+
+| Requirement / Success Criterion | Implementation | Verification | 状态 |
+|---|---|---|---|
+| FR-03 声明式来源、严格 JSON、危险范围门禁 | `plugin/schema.ts`、stable loader、canonical/forbidden capture scope、source contract fingerprint | plugin/config/scope tests | verified |
+| FR-04 hidden/no-follow/stable capture | held directory identities、bounded retry、incremental memory budget、group double-capture | restored parent/final ABA、mutation、size limit tests | verified |
+| FR-05 metadata fidelity | file/dir/symlink/hardlink、mode/time/xattr/flags；fidelity loss => partial | native worker、malformed/permission/symlink tests | verified |
+| FR-02 plaintext secret confirmation | repository + source + exact contract fingerprint；stale/orphan rejection；wizard prune | disable/re-enable + stale contract tests | verified |
+| T2 verified publication | auth+lock before prepare；cwd-bound raw-stdin writer；protected blobs/manifest readback；inode-reconciled publish | interruption/tamper/ABA/lost-ack/lock-release tests | verified |
+| FR-06 dry-run safety | frozen plan、structural verification scope、no prepare、read-only repository open、zero tree mutation | dry-run digest + CLI result tests | verified |
+| 严格 machine result | all CLI paths emit one JSON result；stable category/exit；post-commit faults degraded | CLI/writer operation-result tests | verified |
+
+#### T2 Findings 闭环
+
+| ID 范围 | Severity | 问题簇 | 修复证据 | 最终状态 |
+|---|---|---|---|---|
+| T2-F1-F4 | High | source parent ABA、内存上限滞后、silent metadata loss、optional partial 被标 healthy | held path identity、pre-allocation budget、fidelity issues、health/result derivation | fixed |
+| T2-F5-F8 | High | consistency group torn view、rename 后失败可见、stale plaintext consent、repository parent ABA | identity-rich double pass、commit/degraded semantics、contract fingerprint + prune、directory-bound repository I/O | fixed |
+| T2-F9-F17 | Medium | canonical/repository overlap、plugin mutation、错误分类、cross-source hardlink、verification/end time、CLI exception、manifest reload、prepare 时序、lock release | canonical identity、stable plugin fd、source-local links、frozen plan、strict result、auth/lock-before-prepare | fixed |
+| T2-R2-1-R2-5 | High/Medium | string-path repository/metadata ABA、disable/re-enable、group identity 缺失、degraded lock issue 丢失 | cwd-bound native workers、orphan rejection、dev/ino/ctime/nlink/topology、issue preservation | fixed |
+| T2-R3-1-R3-2 | High | verified fd 仍可 restored-ABA 写出、rename worker 丢 ack 后 failure-visible | cwd-bound raw-stdin writer；final/pending held-inode reconciliation | fixed |
+
+#### T2 修复轮次与 ReviewerContribution
+
+| 轮次 | 结论 | 关键结果 | 验证 |
+|---|---|---|---|
+| R1 | BLOCKED | 8 High + 9 Medium；发现路径竞态、health、consistency、fidelity、consent、publication/result 缺口 | 172 tests baseline |
+| R2 | BLOCKED | 大部分 finding 关闭；残留 repository/metadata ABA、consent lifecycle、group identity、lock release | 200 tests |
+| R3 | BLOCKED | metadata/consent/group/lock 关闭；残留 sensitive write restored ABA 与 lost rename ack | 208 tests |
+| R4 | APPROVED | cwd-bound writer + held-inode commit reconciliation 关闭最后两项；无 open Critical/High/Medium | 34 writer；211 full |
+
+#### T2 自动化、风险与限制
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Focused | PASS | 53/53 T2 focused；final writer 34/34 |
+| Full regression | PASS | 32 files / 211 tests |
+| Type / Build | PASS | `pnpm typecheck`；`pnpm build` |
+| Lint | PASS | direct Biome 99 files；`pnpm exec biome` wrapper 在本环境 exit 254，无 code diagnostic |
+| Diff / Ownership | PASS | `git diff --check`；仅 T2 owned code/tests + parent-owned plan/review |
+| Secret / injection | PASS | no shell；raw stdin；strict relative names；bounded stdout/stderr/timeouts；capture-only identity 从 manifest 删除 |
+
+- **主要风险处理**：Apple Silicon/macOS 的 Node stdlib 没有 `openat/renameat`，因此生产 native metadata、敏感文件写入与 commit rename 使用无 shell、cwd kernel-binding、dev/ino 验证的窄 worker；任何未知/歧义 publication state fail closed 或返回 committed degraded。
+- **回滚**：revert T2 task commit；不得删除已经存在的 v1 repository 或可见 recovery point。T2 尚未 root-wired，不触发自动 migration。
+- **观测**：`OperationResult` 区分 configuration/auth/lock/source/destination/integrity；post-commit durability 与 lock-release 失败不伪装 success。
+- **Known limitation**：明文仓库仍是显式危险模式；用户必须为每个 exact secret source contract 单独确认。完整 point list/health/retention 在 T3 实现。
+- **Knowledge Impact**：none；没有可独立于当前 MRD/plan/code 的 reusable lesson，进入 zero-write compound gate。
+
+#### T2 Contributors
+
+| Reviewer | Role | Scope | Findings | Verification | Knowledge Impact |
+|---|---|---|---|---|---|
+| anvil-doer-t2 | implementation | T2 accepted write set | 关闭全部 finding | 53 focused / 211 full | none |
+| anvil-reviewer-t2 | independent adversarial review | source/repository ABA、fidelity、consistency、publication、results | R1-R3 BLOCKED；R4 APPROVED | final writer 34/34 | none |
+| anvil-lead | final arbiter | spec trace、ownership、full integration | accepted | independent full/type/build/Biome | none |
+
+### 19. Current Final Decision
 
 - **Decision**：`APPROVED`
-- **Rationale**：T1 accepted write set 满足 confirmed MRD/plan，所有对抗 finding 已闭环，focused/full validation 全绿，无 knowledge conflict。
-- **Unresolved Items**：无 T1 blocker；第 11 节限制由后续 plan tasks 处理。
-- **Knowledge Synchronization**：zero-write；`Decision: no-reusable-lesson`。
-- **Resume / Next Action**：提交精确 T1 write set，然后自动开始 T2。
+- **Rationale**：T1-T2 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，211 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
+- **Unresolved Items**：无 T1/T2 blocker；T3-T9 仍按 active plan 执行。
+- **Knowledge Synchronization**：T1-T2 均 zero-write；`Decision: no-reusable-lesson`。
+- **Resume / Next Action**：提交精确 T2 write set，然后自动开始 T3。

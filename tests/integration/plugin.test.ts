@@ -1,6 +1,26 @@
-import { describe, expect, it } from 'vitest'
-import { getEnabledPlugins } from '../../src/plugin/loader.js'
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { getEnabledPlugins, loadUserPlugins } from '../../src/plugin/loader.js'
 import { getBuiltinPlugin, getPluginNames } from '../../src/plugin/registry.js'
+
+const temporaryDirectories: string[] = []
+
+async function pluginDirectory(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'restore-user-plugins-'))
+  temporaryDirectories.push(root)
+  const directory = join(root, 'plugins')
+  await mkdir(directory)
+  return directory
+}
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  )
+})
 
 describe('plugin registry', () => {
   it('should list builtin plugins', () => {
@@ -61,5 +81,176 @@ describe('plugin registry', () => {
   it('should return SOPS plugin definition', () => {
     const plugin = getBuiltinPlugin('sops')
     expect(plugin?.paths).toEqual(['~/.sops'])
+  })
+})
+
+describe('user plugin loader', () => {
+  it('loads strict declarative JSON with conservative sensitivity and no executable fields', async () => {
+    const directory = await pluginDirectory()
+    await writeFile(
+      join(directory, 'custom.json'),
+      JSON.stringify({
+        name: 'custom',
+        description: 'custom settings',
+        sources: [
+          {
+            name: 'settings',
+            path: '/tmp/custom-settings',
+            requirement: 'required',
+            expectedType: 'file',
+            recoveryScope: 'exact',
+          },
+        ],
+      }),
+    )
+
+    const plugins = loadUserPlugins(directory)
+
+    expect(plugins).toHaveLength(1)
+    expect(plugins[0]?.sources[0]).toMatchObject({
+      sensitivity: 'secret',
+      requirement: 'required',
+    })
+    expect(plugins[0]?.paths).toEqual(['/tmp/custom-settings'])
+
+    await writeFile(
+      join(directory, 'executable.json'),
+      JSON.stringify({
+        name: 'executable',
+        description: 'must be rejected',
+        paths: ['/tmp/value'],
+        prepare: 'arbitrary-code',
+      }),
+    )
+    expect(() => loadUserPlugins(directory)).toThrowError(/invalid/)
+  })
+
+  it('maps legacy paths to optional/private sources', async () => {
+    const directory = await pluginDirectory()
+    await writeFile(
+      join(directory, 'legacy.json'),
+      JSON.stringify({ name: 'legacy', description: 'legacy plugin', paths: ['/tmp/legacy'] }),
+    )
+
+    expect(loadUserPlugins(directory)[0]?.sources).toEqual([
+      {
+        name: 'path-1',
+        path: '/tmp/legacy',
+        requirement: 'optional',
+        sensitivity: 'private',
+        expectedType: 'any',
+        recoveryScope: 'exact',
+        includeEmptyDirectories: false,
+      },
+    ])
+  })
+
+  it('rejects malformed, unknown, duplicate, and no-follow plugin inputs', async () => {
+    const malformed = await pluginDirectory()
+    await writeFile(join(malformed, 'bad.json'), '{ bad')
+    expect(() => loadUserPlugins(malformed)).toThrowError(/invalid/)
+
+    const unknown = await pluginDirectory()
+    await writeFile(
+      join(unknown, 'unknown.json'),
+      JSON.stringify({
+        name: 'unknown',
+        description: 'unknown field',
+        paths: ['/tmp/a'],
+        extra: true,
+      }),
+    )
+    expect(() => loadUserPlugins(unknown)).toThrowError(/invalid/)
+
+    const duplicate = await pluginDirectory()
+    for (const filename of ['one.json', 'two.json']) {
+      await writeFile(
+        join(duplicate, filename),
+        JSON.stringify({ name: 'same', description: filename, paths: [`/tmp/${filename}`] }),
+      )
+    }
+    expect(() => loadUserPlugins(duplicate)).toThrowError(/duplicated/)
+
+    const noFollow = await pluginDirectory()
+    const outside = join(noFollow, '..', 'outside.json')
+    await writeFile(
+      outside,
+      JSON.stringify({ name: 'outside', description: 'outside', paths: ['/tmp/outside'] }),
+    )
+    await symlink(outside, join(noFollow, 'linked.json'))
+    expect(() => loadUserPlugins(noFollow)).toThrowError(/regular no-follow/)
+  })
+
+  it('rejects a user plugin that duplicates a built-in name or source name', async () => {
+    const builtinDuplicate = await pluginDirectory()
+    await writeFile(
+      join(builtinDuplicate, 'duplicate.json'),
+      JSON.stringify({ name: 'git', description: 'duplicate', paths: ['/tmp/git'] }),
+    )
+    expect(() => loadUserPlugins(builtinDuplicate)).toThrowError(/duplicated/)
+
+    const sourceDuplicate = await pluginDirectory()
+    const source = {
+      name: 'same',
+      path: '/tmp/source',
+      requirement: 'optional',
+      expectedType: 'any',
+      recoveryScope: 'exact',
+    }
+    await writeFile(
+      join(sourceDuplicate, 'duplicate.json'),
+      JSON.stringify({
+        name: 'duplicate-sources',
+        description: 'duplicate sources',
+        sources: [source, source],
+      }),
+    )
+    expect(() => loadUserPlugins(sourceDuplicate)).toThrowError(/invalid/)
+  })
+
+  it('rejects same-size plugin mutation after the held file descriptor is opened', async () => {
+    const directory = await pluginDirectory()
+    const path = join(directory, 'mutable.json')
+    const first = JSON.stringify({ name: 'alpha', description: 'first', paths: ['/tmp/one'] })
+    const second = JSON.stringify({ name: 'bravo', description: 'other', paths: ['/tmp/two'] })
+    expect(second.length).toBe(first.length)
+    await writeFile(path, first)
+
+    expect(() =>
+      loadUserPlugins(directory, {
+        onPluginReadStart(file) {
+          writeFileSync(file, second)
+        },
+      }),
+    ).toThrowError(/changed while being read/)
+  })
+
+  it('rejects direct and nested plugin-directory ABA replacement', async () => {
+    for (const nested of [false, true]) {
+      const root = await mkdtemp(join(tmpdir(), 'restore-plugin-aba-'))
+      temporaryDirectories.push(root)
+      const parent = nested ? join(root, 'parent') : root
+      const directory = join(parent, 'plugins')
+      await mkdir(directory, { recursive: true })
+      const path = join(directory, 'plugin.json')
+      const content = JSON.stringify({ name: 'alpha', description: 'first', paths: ['/tmp/one'] })
+      await writeFile(path, content)
+      let swapped = false
+
+      expect(() =>
+        loadUserPlugins(directory, {
+          onPluginReadStart() {
+            if (swapped) return
+            swapped = true
+            const target = nested ? parent : directory
+            renameSync(target, `${target}.moved`)
+            mkdirSync(target, { recursive: true })
+            const replacementDirectory = nested ? join(target, 'plugins') : target
+            mkdirSync(replacementDirectory, { recursive: true })
+            writeFileSync(join(replacementDirectory, 'plugin.json'), content)
+          },
+        }),
+      ).toThrowError(/directory changed/)
+    }
   })
 })
