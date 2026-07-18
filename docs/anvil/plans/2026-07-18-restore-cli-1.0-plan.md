@@ -379,15 +379,15 @@ graph TD
 - **Parallel Group**：G5
 - **Execution**：serial
 - **Parallel Blocker**：写入 v1 repository 并共享 restore CLI selection
-- **Ownership**：`src/migration/**`、`src/cli/migrate.ts`、legacy/migration 测试
+- **Ownership**：`src/migration/**`、`src/cli/migrate.ts`、legacy/migration 测试；`src/repository/lock.ts`、`src/repository/index.ts`、`src/engine/v1-backup.ts` 及对应测试（仅 migration-wide verified lock delegation 与 fully-covered legacy metadata override）
 - **Read Set**：现有 snapshot/restore、T1-T4
-- **Write Set**：`src/migration/**`、`src/cli/migrate.ts`、legacy/migration 测试
+- **Write Set**：`src/migration/**`、`src/cli/migrate.ts`、legacy/migration 测试；`src/repository/lock.ts`、`src/repository/index.ts`、`src/engine/v1-backup.ts` 及对应测试（仅 migration-wide verified lock delegation 与 fully-covered legacy metadata override）
 - **描述**：legacy detect/list/restore descriptor、copy migration dry-run/space/preflight、逐 point import/verify、中断重试、源只读证明。
 - **成功标准**：0.1.x fixture 可 list/restore；迁移前后源 hash 不变；中断目标无坏 visible point；迁移点 content verify 通过。
 - **验证**：migration integration、typecheck/lint/build。
 - **预估 Token**：55k
 - **依赖**：T4
-- **涉及文件**：Ownership 全部。
+- **涉及文件**：Ownership 全部；共享 lock/writer 只允许增加不可伪造、可验证且不由 writer 释放的外部 lease 通路，以及 source/path/type/size 全覆盖后才可序列化的 legacy metadata override；两者不得改变普通 backup 默认路径。
 - **执行指令**：不提供源 delete；迁移只通过 public v1 point writer。
 
 ### T6：新 Mac recovery plan 与显式安装
@@ -473,8 +473,8 @@ graph TD
 | T2 | completed | source contract + verified v1 backup; 53 focused and 211 full tests pass; final review APPROVED |
 | T3 | completed | verify/retention/status closure; 29 focused and 239 full tests pass; final review APPROVED |
 | T4 | completed | staging/apply/rollback closure; 58 recovery and 297 total tests pass; final review APPROVED |
-| T5 | in progress | legacy read/copy-migration implementation starting |
-| T6 | pending | — |
+| T5 | completed | strict 0.1.x read/restore + copy-only v1 migration; 76 focused and 326 total tests pass; final review APPROVED |
+| T6 | in progress | new Mac recovery plan and explicit allowlisted installation starting |
 | T7 | pending | — |
 | T8 | pending | — |
 | T9 | pending | — |

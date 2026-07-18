@@ -4,20 +4,20 @@
 
 | 字段 | 值 |
 |---|---|
-| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 accepted working tree，task commit pending |
+| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 `8550bd2`；T5 accepted working tree，task commit pending |
 | Author | anvil-doer / anvil-lead |
 | Review Date | 2026-07-18 |
 | Review Writer | anvil-lead |
-| Status | `APPROVED`（T1-T4 accepted write sets；完整 1.0 MR 仍 active） |
+| Status | `APPROVED`（T1-T5 accepted write sets；完整 1.0 MR 仍 active） |
 
 ## 第一层：3 分钟读懂
 
 ### 1. Review 摘要
 
-- **一句话结论**：T1-T4（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback）均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
+- **一句话结论**：T1-T5（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback、legacy 读取/复制迁移）均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
 - **为什么现在要改**：1.0 的备份、验证、恢复和调度都依赖同一个仓库身份、认证加密、锁和操作结果契约；基础错误会向所有后续任务扩散。
-- **交付结果**：除 v1 repository/protection 与 declarative verified backup 外，新增 structural/content verify、healthy retention/status，以及 authenticated staging、reviewed apply、Safety Point、retry/rollback state machine。
-- **主要影响**：T1-T4 accepted write sets；legacy migration、新 Mac plan、scheduler、root CLI/package/release hardening 仍由 T5-T9 完成。
+- **交付结果**：除 v1 repository/protection 与 declarative verified backup 外，新增 structural/content verify、healthy retention/status、authenticated staging/apply/rollback，以及 strict legacy 0.1.x read/restore 和 copy-only verified v1 migration。
+- **主要影响**：T1-T5 accepted write sets；新 Mac plan、scheduler、root CLI/package/release hardening 仍由 T6-T9 完成。
 - **Reviewer Action**：先看 T4 authenticated intent/lifecycle，再看 apply/rollback preflight、Safety lease、atomic workers 与 metadata identity cutoff；T1-T3 细节见各任务补充。
 
 ### 2. 背景与目标
@@ -354,10 +354,10 @@ N/A（非迁移 task）。
 ### 19. Current Final Decision
 
 - **Decision**：`APPROVED`
-- **Rationale**：T1-T4 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，297 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
-- **Unresolved Items**：无 T1-T4 blocker；T5-T9 仍按 active plan 执行。
-- **Knowledge Synchronization**：T1-T4 均 zero-write；`Decision: no-reusable-lesson`。
-- **Resume / Next Action**：提交精确 T4 write set，然后自动开始 T5。
+- **Rationale**：T1-T5 accepted write sets 满足 confirmed MRD/plan；全部对抗 finding 闭环，326 tests、typecheck、build、Biome 全绿，无 knowledge conflict。
+- **Unresolved Items**：无 T1-T5 blocker；T6-T9 仍按 active plan 执行。
+- **Knowledge Synchronization**：T1-T5 均 zero-write；`Decision: no-reusable-lesson`。
+- **Resume / Next Action**：提交精确 T5 write set，然后自动开始 T6。
 
 ### 20. T3 验证、健康、保留与状态评审补充
 
@@ -492,6 +492,76 @@ Decision: no-reusable-lesson
 Action: submit
 Mode: apply
 Scope: T4 recovery staging, apply and rollback
+Candidates: 0
+Active: 0
+Draft: 0
+Conflicts: 0
+Operations: 0
+Writes: 0
+Deletes: 0
+Validation: Collect pass (review-auto); Select no candidates because no knowledge root exists; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
+Decision: no-reusable-lesson
+```
+
+### 22. T5 legacy 读取、恢复与复制迁移评审补充
+
+#### T5 摘要、边界与结果
+
+- **一句话结论**：T5 经独立对抗复核和最终 metadata-fidelity 窄修复后通过，当前无未解决 Critical / High / Medium finding。
+- **Before / After**：从不可验证的 legacy snapshot 目录直接访问，升级为 strict 0.1.x read-only detect/list/restore，以及默认 dry-run、显式 copy-only、逐 point 验证和可中断重试的 v1 migration。
+- **Accepted Write Set**：`src/migration/**`、`src/cli/migrate.ts`、migration tests；以及 migration-wide delegated lock 与 fully-covered metadata override 所需的 `src/repository/lock.ts`、`src/repository/index.ts`、`src/engine/v1-backup.ts` 及对应测试。
+- **非目标**：不删除 legacy 源；不 root-wire 命令（T8）；不提供任意 installer framework（T6）。
+
+#### T5 需求—实现—验证映射
+
+| Requirement / Success Criterion | Implementation | Verification | 状态 |
+|---|---|---|---|
+| strict 0.1.x read-only scan | no-follow cwd-bound worker、bounded enumeration/hash、before/after logical+physical identity digest | malformed/symlink/FIFO/oversize/ABA/Unicode tests | verified |
+| safe legacy restore | reviewed source identity digest、non-broad destination、default dry-run、atomic publish、never overwrite/delete | retry/reconciliation/destination-parent ABA tests | verified |
+| explicit copy migration | exact safe logical sources、capacity overhead、physical overlap preflight、private immutable staging | empty-leaf/all-empty/space/overlap/source-unchanged tests | verified |
+| only public v1 writer | `createV1RecoveryPoint` 发布；逐 point healthy verify；final expected-set + selector-all verify | interrupted retry/orphan pending/bad visible point/content verification tests | verified |
+| migration-wide exclusion | repository-bound unforgeable delegated lease；writer validates but never releases caller lock | forged/released/cross-repo/replaced lease and concurrent writer/retention/migration tests | verified |
+| exact legacy metadata | authenticated all-entry override coverage；serialized metadata exactly `mode/size/modifiedAtNs` | 0600/0700 decrypted-manifest exact-object and normal-backup parity tests | verified |
+| stable CLI automation | FR-19 counts/timestamps/scope/results；category/exit preserved | configuration/source/destination/integrity CLI tests | verified |
+
+#### T5 Findings 闭环与修复结果
+
+| 问题簇 | Severity | 修复证据 | 最终状态 |
+|---|---|---|---|
+| manifest provenance 不精确、missing verify 被忽略、final set 未断言 | High / Medium | 全 entry path/type/mode/mtime/size/hash 比对；仅 `healthy` 通过；final expected/repository set 重验 | fixed |
+| unbounded enumeration、empty branch 遗漏、capacity 低估、retry bound 过小 | Medium | streamed cap、empty leaf representation、entry/source/manifest overhead、10k authenticated discovery | fixed |
+| source/destination path ABA 和 source-root symlink | High / Medium | root pre-canonical symlink reject、cwd/inode/time-bound workers、parent identity checkpoints | fixed |
+| migration 多 point 间无全程独占锁 | High | canonical repository-bound WeakMap capability；发现前 acquire，final verify 后 release | fixed |
+| staging metadata 合并泄漏 `createdAtNs`/xattrs/flags | Medium | override 改为 exact fresh `{mode,size,modifiedAtNs}` object；加密 manifest 精确断言 | fixed |
+| CLI 错误分类被统一改写 | Medium | 保留 service category/exit；仅 config resolution 映射 configuration/10 | fixed |
+
+#### T5 自动化、风险与 ReviewerContribution
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Focused | PASS | final expanded 76/76；reviewer independent 67/67 |
+| Full regression | PASS | 41 files / 326 tests |
+| Type / Build | PASS | `tsc --noEmit`；`pnpm build` |
+| Lint / Diff | PASS | direct Biome 130 files；`git diff --check` |
+| Security / Fidelity | PASS | bounded no-follow I/O；source zero-write audit；exact authenticated provenance；full-lifecycle lock |
+
+- **回滚**：revert T5 task commit；不删除 legacy 源、已发布 v1 recovery point 或 pending 诊断残留。
+- **观测**：migration 输出 stable category/code、source/point counts、scope、timestamps、per-point outcome 与 final verification。
+- **Known limitation**：legacy all-empty point 无法构造安全非 broad logical source，因此显式 unsupported；不推断或删除源。
+- **Knowledge Impact**：none；结论均为当前 migration contract 的实现特定 hardening，zero-write compound。
+
+| Reviewer | Role | Scope | Findings | Verification | Knowledge Impact |
+|---|---|---|---|---|---|
+| anvil-doer-t5 | implementation | T5 accepted write set | 关闭全部 finding | 76 focused / 326 full | none |
+| anvil-reviewer-t5 | independent adversarial review | scanner/restore/migration/provenance/lock/metadata/CLI | final APPROVED；0 open C/H/M | 67 focused + type/Biome/diff | none |
+| anvil-lead | final arbiter | plan trace、ownership、compound、task boundary | accepted | full/type/build/Biome/diff | none |
+
+#### T5 CompoundResultV2
+
+```text
+Action: submit
+Mode: apply
+Scope: T5 legacy read, restore and copy-only v1 migration
 Candidates: 0
 Active: 0
 Draft: 0

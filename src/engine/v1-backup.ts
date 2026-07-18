@@ -9,13 +9,19 @@ import { capturePlan } from '../catalog/capture.js'
 import { sourceContractFingerprint } from '../catalog/scope.js'
 import type { CaptureOptions } from '../catalog/stable-read.js'
 import { CatalogCaptureError } from '../catalog/stable-read.js'
-import type { CapturePlan, CaptureResult, CapturedEntry } from '../catalog/types.js'
+import type {
+  CapturePlan,
+  CaptureResult,
+  CapturedEntry,
+  CapturedMetadata,
+} from '../catalog/types.js'
 import type { PlaintextSecretAcceptance } from '../config/types.js'
 import type { CredentialProvider } from '../protection/credentials.js'
 import { ProtectionError } from '../protection/errors.js'
 import {
   RepositoryError,
   acquireRepositoryLock,
+  assertRepositoryLockOwnership,
   createOperationResult,
   openRepository,
 } from '../repository/index.js'
@@ -26,6 +32,7 @@ import type {
   OperationState,
   ProtectionMode,
   RepositoryHandle,
+  RepositoryLock,
 } from '../repository/index.js'
 import { readBoundedRegularFile, syncDirectory } from '../repository/io.js'
 
@@ -179,6 +186,10 @@ export interface V1BackupOptions {
   cliVersion?: string
   now?: () => Date
   capture?: CaptureOptions
+  /** Exact metadata imported from an authenticated source after staged content verification. */
+  capturedMetadataOverrides?: V1CapturedMetadataOverride[]
+  /** An active repository-bound lease owned and released by the caller. */
+  heldLock?: RepositoryLock
   onStage?: (context: BackupWriteStageContext) => void | Promise<void>
   cleanupPending?: (path: string) => Promise<void>
   beforeCapture?: () => Promise<void>
@@ -189,6 +200,13 @@ export interface V1BackupOptions {
   beforeDirectoryBoundCommit?: (pointsPath: string) => void | Promise<void>
   /** Test-only fault injection for a lost successful commit acknowledgement. */
   commitWorkerOutputMode?: 'normal' | 'suppress-after-commit' | 'malformed-after-commit'
+}
+
+export interface V1CapturedMetadataOverride {
+  sourceId: string
+  relativePath: string
+  type: CapturedEntry['type']
+  metadata: Pick<CapturedMetadata, 'mode' | 'size' | 'modifiedAtNs'>
 }
 
 interface ManifestBlob {
@@ -808,6 +826,86 @@ function wipeCapture(capture: CaptureResult | undefined): void {
   for (const entry of capture?.entries ?? []) entry.content?.fill(0)
 }
 
+function applyCapturedMetadataOverrides(
+  capture: CaptureResult,
+  overrides: readonly V1CapturedMetadataOverride[] | undefined,
+): void {
+  if (!overrides) return
+  if (capture.sources.some((source) => source.status !== 'captured')) {
+    throw new BackupFailure(
+      'integrity',
+      'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+      'Captured metadata overrides require every source to be captured exactly',
+    )
+  }
+  const expected = new Map<string, V1CapturedMetadataOverride>()
+  for (const override of overrides) {
+    const metadata = override?.metadata
+    if (
+      !override ||
+      typeof override.sourceId !== 'string' ||
+      override.sourceId.length < 1 ||
+      override.sourceId.length > 1024 ||
+      typeof override.relativePath !== 'string' ||
+      override.relativePath.length < 1 ||
+      override.relativePath.length > 8192 ||
+      !['file', 'directory', 'symlink'].includes(override.type) ||
+      Object.keys(override).sort().join(',') !== 'metadata,relativePath,sourceId,type' ||
+      !metadata ||
+      typeof metadata !== 'object' ||
+      Object.keys(metadata).sort().join(',') !== 'mode,modifiedAtNs,size' ||
+      !Number.isSafeInteger(metadata.mode) ||
+      metadata.mode < 0 ||
+      metadata.mode > 0o7777 ||
+      !Number.isSafeInteger(metadata.size) ||
+      metadata.size < 0 ||
+      typeof metadata.modifiedAtNs !== 'string' ||
+      !/^[0-9]{1,20}$/.test(metadata.modifiedAtNs)
+    ) {
+      throw new BackupFailure(
+        'configuration',
+        'INVALID_CAPTURED_METADATA_OVERRIDE',
+        'Captured metadata override contract is invalid',
+      )
+    }
+    const key = `${override.sourceId}\0${override.relativePath}`
+    if (expected.has(key)) {
+      throw new BackupFailure(
+        'configuration',
+        'INVALID_CAPTURED_METADATA_OVERRIDE',
+        'Captured metadata override contract contains duplicate entries',
+      )
+    }
+    expected.set(key, override)
+  }
+  if (expected.size !== capture.entries.length) {
+    throw new BackupFailure(
+      'integrity',
+      'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+      'Captured metadata overrides do not cover the exact captured entry set',
+    )
+  }
+  for (const entry of capture.entries) {
+    const override = expected.get(`${entry.sourceId}\0${entry.relativePath}`)
+    if (
+      !override ||
+      override.type !== entry.type ||
+      (entry.type === 'file' && override.metadata.size !== entry.metadata.size)
+    ) {
+      throw new BackupFailure(
+        'integrity',
+        'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+        'Captured metadata override does not match verified staged content',
+      )
+    }
+    entry.metadata = {
+      mode: override.metadata.mode,
+      size: override.metadata.size,
+      modifiedAtNs: override.metadata.modifiedAtNs,
+    }
+  }
+}
+
 function manifestEntry(
   entry: CapturedEntry,
   blobId: string | undefined,
@@ -1036,6 +1134,7 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
   const guard = new RepositoryPathGuard()
   let repository: RepositoryHandle | undefined
   let lock: Awaited<ReturnType<typeof acquireRepositoryLock>> | undefined
+  let releaseOwnedLock = false
   let capture: CaptureResult | undefined
   let pendingPath: string | undefined
   let pointPath: string | undefined
@@ -1092,7 +1191,12 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
     }
     await guard.assertStable()
     if (!options.dryRun) {
-      lock = await acquireRepositoryLock(repository, 'backup')
+      if (options.heldLock) lock = options.heldLock
+      else {
+        lock = await acquireRepositoryLock(repository, 'backup')
+        releaseOwnedLock = true
+      }
+      await assertRepositoryLockOwnership(repository, lock)
       try {
         await options.beforeCapture?.()
       } catch {
@@ -1101,6 +1205,7 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
     }
 
     capture = await capturePlan(options.plan, options.capture)
+    applyCapturedMetadataOverrides(capture, options.capturedMetadataOverrides)
     const catalogIssues = sourceIssues(capture)
     if (capture.requiredFailed) {
       finalResult = operationResult({
@@ -1127,6 +1232,10 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
         verificationScope: 'structural',
       })
     } else {
+      if (!lock) {
+        throw new BackupFailure('lock', 'REPOSITORY_LOCK_REQUIRED', 'Repository lock is missing')
+      }
+      await assertRepositoryLockOwnership(repository, lock)
       await guard.assertStable()
       await mkdir(pendingPath, { mode: 0o700 })
       await guard.holdDirectory(pendingPath)
@@ -1140,6 +1249,7 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
         guard,
       )
       bytesWritten += sealed.bytesWritten
+      await assertRepositoryLockOwnership(repository, lock)
       const completedAt = safeNow(options.now).toISOString()
       const manifest = buildManifest(
         repository,
@@ -1227,6 +1337,7 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
       }
       await guard.assertStable()
       await options.beforeDirectoryBoundCommit?.(pointsPath)
+      await assertRepositoryLockOwnership(repository, lock)
       const pendingIdentity = guard.identity(pendingPath)
       const commit = await directoryBoundCommit(
         pointsPath,
@@ -1264,6 +1375,7 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
       }
       await guard.moveHeldDirectory(pendingPath, pointPath)
       published = true
+      await assertRepositoryLockOwnership(repository, lock)
       if (!durable) {
         throw new BackupFailure(
           'destination',
@@ -1347,6 +1459,9 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
     ]
     if (pendingPath && !published && (await exists(pendingPath).catch(() => false))) {
       try {
+        if (!options.dryRun && repository && lock) {
+          await assertRepositoryLockOwnership(repository, lock)
+        }
         await cleanupPendingSafely(pendingPath, guard, options.cleanupPending)
       } catch {
         issues.push({
@@ -1376,7 +1491,7 @@ export async function createV1RecoveryPoint(options: V1BackupOptions): Promise<O
   }
 
   try {
-    await lock?.release()
+    if (releaseOwnedLock) await lock?.release()
   } catch (error) {
     const failure = failureDetails(error)
     const lockIssue: ClassifiedIssue = {

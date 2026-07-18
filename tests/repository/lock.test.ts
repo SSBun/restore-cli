@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as waitForRetry } from 'node:timers/promises'
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   RepositoryLockError,
   acquireRepositoryLock,
+  assertRepositoryLockOwnership,
   clearConfirmedRepositoryLock,
   clearOrphanedRepositoryLock,
   clearStaleRepositoryLock,
@@ -52,6 +53,47 @@ async function writeStaleLock(
 }
 
 describe('repository lock', () => {
+  it('issues an unforgeable repository-bound capability and rejects released or cross-repository use', async () => {
+    const first = await writableRepository()
+    const second = await writableRepository()
+    const lock = await acquireRepositoryLock(first.repository, 'delegated')
+    const forged = {
+      metadata: lock.metadata,
+      async release() {},
+    }
+
+    await expect(assertRepositoryLockOwnership(first.repository, lock)).resolves.toBeUndefined()
+    await expect(assertRepositoryLockOwnership(first.repository, forged)).rejects.toMatchObject({
+      code: 'LOCK_CAPABILITY_INVALID',
+    })
+    await expect(assertRepositoryLockOwnership(second.repository, lock)).rejects.toMatchObject({
+      code: 'LOCK_CAPABILITY_REPOSITORY_MISMATCH',
+    })
+
+    await lock.release()
+    await expect(assertRepositoryLockOwnership(first.repository, lock)).rejects.toMatchObject({
+      code: 'LOCK_CAPABILITY_RELEASED',
+    })
+    first.repository.close()
+    second.repository.close()
+  })
+
+  it('rejects a capability after owner metadata is replaced even with identical content', async () => {
+    const { repository } = await writableRepository()
+    const lock = await acquireRepositoryLock(repository, 'delegated')
+    const ownerPath = join(repository.layout.repositoryLock, 'owner.json')
+    const displaced = `${ownerPath}.displaced`
+    const content = await readFile(ownerPath)
+    await rename(ownerPath, displaced)
+    await writeFile(ownerPath, content, { mode: 0o600 })
+
+    await expect(assertRepositoryLockOwnership(repository, lock)).rejects.toMatchObject({
+      code: 'LOCK_OWNERSHIP_CHANGED',
+    })
+    await expect(lock.release()).rejects.toMatchObject({ code: 'LOCK_OWNERSHIP_CHANGED' })
+    repository.close()
+  })
+
   it('allows one owner and reports live contention without clearing it', async () => {
     const { repository } = await writableRepository()
     const first = await acquireRepositoryLock(repository, 'backup', { instanceId: 'first' })

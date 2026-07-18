@@ -13,6 +13,7 @@ export type {
 export { getRepositoryLayout, getRepositoryPath } from './layout.js'
 export {
   acquireRepositoryLock,
+  assertRepositoryLockOwnership,
   clearConfirmedRepositoryLock,
   clearOrphanedRepositoryLock,
   clearStaleRepositoryLock,

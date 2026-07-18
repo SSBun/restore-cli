@@ -13,19 +13,26 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { capturePlan as captureResolvedPlan } from '../../src/catalog/capture.js'
 import { buildCapturePlan } from '../../src/catalog/index.js'
 import { sourceContractFingerprint } from '../../src/catalog/scope.js'
 import type { PlaintextSecretAcceptance } from '../../src/config/types.js'
 import {
   type BackupWriteStage,
   type RecoveryPointManifestV1,
+  type V1CapturedMetadataOverride,
   createV1RecoveryPoint,
 } from '../../src/engine/v1-backup.js'
 import type { PluginManifest, SourceSpec } from '../../src/plugin/types.js'
 import type { CredentialProvider } from '../../src/protection/credentials.js'
 import { MasterKey } from '../../src/protection/secrets.js'
-import { initializeRepository, openRepository } from '../../src/repository/index.js'
-import type { ProtectionMode } from '../../src/repository/index.js'
+import {
+  acquireRepositoryLock,
+  initializeRepository,
+  inspectRepositoryLock,
+  openRepository,
+} from '../../src/repository/index.js'
+import type { ProtectionMode, RepositoryLock } from '../../src/repository/index.js'
 
 const roots: string[] = []
 const fixedNow = () => new Date('2026-07-19T00:00:00.000Z')
@@ -823,6 +830,193 @@ describe('v1 lock release degradation', () => {
     expect(result.issues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining(['BACKUP_FAILED', 'LOCK_OWNERSHIP_CHANGED']),
     )
+    expect(result.issues.map((issue) => issue.code)).toContain('PENDING_CLEANUP_FAILED')
+    expect(await pointNames(repository)).toEqual(['lock-failure.pending'])
+  })
+})
+
+describe('v1 delegated repository lock', () => {
+  it('uses a valid caller lease, blocks another writer, and never releases it', async () => {
+    const repository = await createRepository()
+    const source = join(repository.root, 'delegated-source')
+    await writeFile(source, 'content')
+    const handle = await openRepository(repository.repositoryPath, {
+      intent: 'write',
+      expectedRepositoryId: repository.repositoryId,
+      expectedProtection: repository.protection,
+    })
+    const lock = await acquireRepositoryLock(handle, 'migration')
+
+    const result = await createV1RecoveryPoint({
+      ...backupOptions(repository, [sourcePlugin(source)], 'delegated-lock'),
+      heldLock: lock,
+      async beforeCapture() {
+        await expect(acquireRepositoryLock(handle, 'competing-backup')).rejects.toMatchObject({
+          code: 'REPOSITORY_LOCKED',
+        })
+      },
+    })
+
+    expect(result.state).toBe('success')
+    expect(await inspectRepositoryLock(handle)).toMatchObject({
+      state: 'locked',
+      metadata: { lockId: lock.metadata.lockId, operation: 'migration' },
+    })
+    await expect(acquireRepositoryLock(handle, 'after-writer')).rejects.toMatchObject({
+      code: 'REPOSITORY_LOCKED',
+    })
+    await lock.release()
+    handle.close()
+  })
+
+  it('rejects forged, released, cross-repository, and replaced delegated leases', async () => {
+    const first = await createRepository()
+    const second = await createRepository()
+    const source = join(first.root, 'delegated-invalid-source')
+    await writeFile(source, 'content')
+    const firstHandle = await openRepository(first.repositoryPath, {
+      intent: 'write',
+      expectedRepositoryId: first.repositoryId,
+      expectedProtection: first.protection,
+    })
+    const secondHandle = await openRepository(second.repositoryPath, {
+      intent: 'write',
+      expectedRepositoryId: second.repositoryId,
+      expectedProtection: second.protection,
+    })
+
+    const forged = {
+      metadata: {
+        formatVersion: 1 as const,
+        lockId: '00000000-0000-4000-8000-000000000000',
+        owner: { pid: process.pid, hostname: 'forged', instanceId: 'forged' },
+        operation: 'forged',
+        startedAt: fixedNow().toISOString(),
+      },
+      async release() {},
+    } satisfies RepositoryLock
+    const forgedResult = await createV1RecoveryPoint({
+      ...backupOptions(first, [sourcePlugin(source)], 'forged-lock'),
+      heldLock: forged,
+    })
+    expect(forgedResult.issues[0]?.code).toBe('LOCK_CAPABILITY_INVALID')
+
+    const released = await acquireRepositoryLock(firstHandle, 'released')
+    await released.release()
+    const releasedResult = await createV1RecoveryPoint({
+      ...backupOptions(first, [sourcePlugin(source)], 'released-lock'),
+      heldLock: released,
+    })
+    expect(releasedResult.issues[0]?.code).toBe('LOCK_CAPABILITY_RELEASED')
+
+    const crossRepository = await acquireRepositoryLock(firstHandle, 'cross-repository')
+    const crossResult = await createV1RecoveryPoint({
+      ...backupOptions(second, [sourcePlugin(source)], 'cross-lock'),
+      heldLock: crossRepository,
+    })
+    expect(crossResult.issues[0]?.code).toBe('LOCK_CAPABILITY_REPOSITORY_MISMATCH')
+    await crossRepository.release()
+
+    const replaced = await acquireRepositoryLock(firstHandle, 'replaced')
+    const ownerPath = join(firstHandle.layout.repositoryLock, 'owner.json')
+    const content = await readFile(ownerPath)
+    await rename(ownerPath, `${ownerPath}.displaced`)
+    await writeFile(ownerPath, content, { mode: 0o600 })
+    const replacedResult = await createV1RecoveryPoint({
+      ...backupOptions(first, [sourcePlugin(source)], 'replaced-lock'),
+      heldLock: replaced,
+    })
+    expect(replacedResult.issues[0]?.code).toBe('LOCK_OWNERSHIP_CHANGED')
+
+    firstHandle.close()
+    secondHandle.close()
+  })
+})
+
+describe('v1 captured metadata override contract', () => {
+  it('leaves normal backup metadata unchanged when no override contract is supplied', async () => {
+    const repository = await createRepository()
+    const source = join(repository.root, 'normal-metadata-source')
+    await writeFile(source, 'content', { mode: 0o640 })
+    const options = backupOptions(repository, [sourcePlugin(source)], 'normal-metadata-parity')
+    const baseline = await captureResolvedPlan(options.plan)
+
+    const result = await createV1RecoveryPoint(options)
+    const entry = (await readManifest(repository, 'normal-metadata-parity')).entries[0]
+
+    expect(result.state).toBe('success')
+    expect(entry?.metadata).toEqual(baseline.entries[0]?.metadata)
+    for (const captured of baseline.entries) captured.content?.fill(0)
+  })
+
+  it('rejects missing, extra, duplicate, wrong-path/type/size, and malformed overrides', async () => {
+    const repository = await createRepository()
+    const source = join(repository.root, 'override-source')
+    await writeFile(source, 'content', { mode: 0o600 })
+    const sourceMetadata = await stat(source, { bigint: true })
+    const valid: V1CapturedMetadataOverride = {
+      sourceId: 'plugin:source',
+      relativePath: '.',
+      type: 'file',
+      metadata: {
+        mode: 0o600,
+        size: Number(sourceMetadata.size),
+        modifiedAtNs: sourceMetadata.mtimeNs.toString(),
+      },
+    }
+    const cases: Array<{
+      name: string
+      overrides: V1CapturedMetadataOverride[]
+      code: string
+    }> = [
+      { name: 'missing', overrides: [], code: 'CAPTURED_METADATA_OVERRIDE_MISMATCH' },
+      {
+        name: 'extra',
+        overrides: [valid, { ...valid, relativePath: 'extra' }],
+        code: 'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+      },
+      {
+        name: 'duplicate',
+        overrides: [valid, { ...valid }],
+        code: 'INVALID_CAPTURED_METADATA_OVERRIDE',
+      },
+      {
+        name: 'wrong-path',
+        overrides: [{ ...valid, relativePath: 'other' }],
+        code: 'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+      },
+      {
+        name: 'wrong-type',
+        overrides: [{ ...valid, type: 'directory' }],
+        code: 'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+      },
+      {
+        name: 'wrong-size',
+        overrides: [{ ...valid, metadata: { ...valid.metadata, size: valid.metadata.size + 1 } }],
+        code: 'CAPTURED_METADATA_OVERRIDE_MISMATCH',
+      },
+      {
+        name: 'malformed-mode',
+        overrides: [{ ...valid, metadata: { ...valid.metadata, mode: 0o10000 } }],
+        code: 'INVALID_CAPTURED_METADATA_OVERRIDE',
+      },
+      {
+        name: 'malformed-mtime',
+        overrides: [{ ...valid, metadata: { ...valid.metadata, modifiedAtNs: '1'.repeat(21) } }],
+        code: 'INVALID_CAPTURED_METADATA_OVERRIDE',
+      },
+    ]
+
+    for (const testCase of cases) {
+      const result = await createV1RecoveryPoint({
+        ...backupOptions(repository, [sourcePlugin(source)], `override-${testCase.name}`),
+        capturedMetadataOverrides: testCase.overrides,
+      })
+      expect(result).toMatchObject({
+        state: 'failure',
+        issues: [{ code: testCase.code }],
+      })
+    }
     expect(await pointNames(repository)).toEqual([])
   })
 })

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, readdir, rename, rmdir, unlink } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import type { BigIntStats } from 'node:fs'
+import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises'
 import { hostname } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { assertRepositoryWriteAuthorized } from './authorization.js'
 import { RepositoryError, isNodeError } from './errors.js'
 import { readBoundedRegularFile, syncDirectory, writeDurableExclusiveFile } from './io.js'
@@ -37,6 +39,28 @@ export interface RepositoryLock {
   metadata: RepositoryLockMetadata
   release(): Promise<void>
 }
+
+interface RepositoryLockCapability {
+  brand: symbol
+  repository: {
+    path: string
+    repositoryId: string
+    device: bigint
+    inode: bigint
+  }
+  lockDirectory: {
+    path: string
+    device: bigint
+    inode: bigint
+  }
+  metadataPath: string
+  metadataIdentity: BigIntStats
+  metadata: RepositoryLockMetadata
+  released: boolean
+}
+
+const REPOSITORY_LOCK_BRAND = Symbol('RepositoryLockCapability')
+const repositoryLockCapabilities = new WeakMap<RepositoryLock, RepositoryLockCapability>()
 
 export interface ConfirmedRepositoryLockClearOptions {
   confirm: boolean
@@ -81,6 +105,154 @@ async function readLockMetadata(metadataPath: string): Promise<RepositoryLockMet
   } catch {
     return null
   }
+}
+
+function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+  return (
+    left.isFile() &&
+    right.isFile() &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.nlink === right.nlink &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  )
+}
+
+function lockMetadataMatches(
+  actual: RepositoryLockMetadata | null,
+  expected: RepositoryLockMetadata,
+): boolean {
+  return (
+    actual !== null &&
+    actual.formatVersion === expected.formatVersion &&
+    actual.lockId === expected.lockId &&
+    actual.owner.pid === expected.owner.pid &&
+    actual.owner.hostname === expected.owner.hostname &&
+    actual.owner.instanceId === expected.owner.instanceId &&
+    actual.operation === expected.operation &&
+    actual.startedAt === expected.startedAt
+  )
+}
+
+async function assertCapabilityFilesystemOwnership(
+  capability: RepositoryLockCapability,
+): Promise<void> {
+  let repository: BigIntStats
+  let lockDirectory: BigIntStats
+  let metadataHandle: Awaited<ReturnType<typeof open>>
+  try {
+    repository = await lstat(capability.repository.path, { bigint: true })
+    lockDirectory = await lstat(capability.lockDirectory.path, { bigint: true })
+    metadataHandle = await open(
+      capability.metadataPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    )
+  } catch {
+    throw new RepositoryError(
+      'lock',
+      'LOCK_OWNERSHIP_CHANGED',
+      'Repository lock ownership changed; delegated access was rejected',
+    )
+  }
+  try {
+    const heldBefore = await metadataHandle.stat({ bigint: true })
+    const namedBefore = await lstat(capability.metadataPath, { bigint: true })
+    if (
+      !repository.isDirectory() ||
+      repository.isSymbolicLink() ||
+      repository.dev !== capability.repository.device ||
+      repository.ino !== capability.repository.inode ||
+      !lockDirectory.isDirectory() ||
+      lockDirectory.isSymbolicLink() ||
+      lockDirectory.dev !== capability.lockDirectory.device ||
+      lockDirectory.ino !== capability.lockDirectory.inode ||
+      !sameFileIdentity(heldBefore, capability.metadataIdentity) ||
+      !sameFileIdentity(namedBefore, capability.metadataIdentity) ||
+      heldBefore.size > BigInt(MAX_LOCK_METADATA_BYTES)
+    ) {
+      throw new Error('lock identity mismatch')
+    }
+    const content = Buffer.alloc(Number(heldBefore.size))
+    try {
+      let offset = 0
+      while (offset < content.length) {
+        const { bytesRead } = await metadataHandle.read(
+          content,
+          offset,
+          content.length - offset,
+          null,
+        )
+        if (bytesRead < 1) throw new Error('short lock metadata read')
+        offset += bytesRead
+      }
+      const heldAfter = await metadataHandle.stat({ bigint: true })
+      const namedAfter = await lstat(capability.metadataPath, { bigint: true })
+      if (
+        !sameFileIdentity(heldAfter, capability.metadataIdentity) ||
+        !sameFileIdentity(namedAfter, capability.metadataIdentity) ||
+        !lockMetadataMatches(
+          parseLockMetadata(JSON.parse(content.toString('utf8'))),
+          capability.metadata,
+        )
+      ) {
+        throw new Error('lock metadata mismatch')
+      }
+    } finally {
+      content.fill(0)
+    }
+  } catch {
+    throw new RepositoryError(
+      'lock',
+      'LOCK_OWNERSHIP_CHANGED',
+      'Repository lock ownership changed; delegated access was rejected',
+    )
+  } finally {
+    await metadataHandle.close().catch(() => undefined)
+  }
+}
+
+async function validateRepositoryLockOwnership(
+  repository: RepositoryHandle,
+  lock: RepositoryLock,
+  requireAuthorizedHandle: boolean,
+): Promise<void> {
+  if (requireAuthorizedHandle) assertRepositoryWriteAuthorized(repository)
+  const capability = repositoryLockCapabilities.get(lock)
+  if (!capability || capability.brand !== REPOSITORY_LOCK_BRAND) {
+    throw new RepositoryError(
+      'lock',
+      'LOCK_CAPABILITY_INVALID',
+      'Repository lock capability was not issued by this process',
+    )
+  }
+  if (capability.released) {
+    throw new RepositoryError(
+      'lock',
+      'LOCK_CAPABILITY_RELEASED',
+      'Repository lock capability has already been released',
+    )
+  }
+  if (
+    resolve(repository.path) !== capability.repository.path ||
+    repository.descriptor.repositoryId !== capability.repository.repositoryId
+  ) {
+    throw new RepositoryError(
+      'lock',
+      'LOCK_CAPABILITY_REPOSITORY_MISMATCH',
+      'Repository lock capability belongs to a different repository',
+    )
+  }
+  await assertCapabilityFilesystemOwnership(capability)
+}
+
+export async function assertRepositoryLockOwnership(
+  repository: RepositoryHandle,
+  lock: RepositoryLock,
+): Promise<void> {
+  await validateRepositoryLockOwnership(repository, lock, true)
 }
 
 function isOwnerAlive(metadata: RepositoryLockMetadata): boolean | null {
@@ -207,25 +379,45 @@ export async function acquireRepositoryLock(
     )
   }
 
-  let released = false
-  return {
+  let repositoryIdentity: BigIntStats
+  let lockDirectoryIdentity: BigIntStats
+  let metadataIdentity: BigIntStats
+  try {
+    repositoryIdentity = await lstat(repository.path, { bigint: true })
+    lockDirectoryIdentity = await lstat(repository.layout.repositoryLock, { bigint: true })
+    metadataIdentity = await lstat(metadataPath, { bigint: true })
+    if (
+      !repositoryIdentity.isDirectory() ||
+      repositoryIdentity.isSymbolicLink() ||
+      !lockDirectoryIdentity.isDirectory() ||
+      lockDirectoryIdentity.isSymbolicLink() ||
+      !metadataIdentity.isFile() ||
+      metadataIdentity.isSymbolicLink()
+    ) {
+      throw new Error('unsafe lock capability identity')
+    }
+  } catch {
+    await unlink(metadataPath).catch(() => undefined)
+    await rmdir(repository.layout.repositoryLock).catch(() => undefined)
+    throw new RepositoryError(
+      'lock',
+      'LOCK_ACQUIRE_FAILED',
+      'Repository lock capability identity could not be established',
+    )
+  }
+
+  const lock: RepositoryLock = {
     metadata,
     async release() {
-      if (released) return
-      const current = await readLockMetadata(metadataPath)
-      if (!current || current.lockId !== metadata.lockId) {
-        throw new RepositoryError(
-          'lock',
-          'LOCK_OWNERSHIP_CHANGED',
-          'Repository lock ownership changed; the lock was not cleared',
-        )
-      }
+      const capability = repositoryLockCapabilities.get(lock)
+      if (capability?.released) return
+      await validateRepositoryLockOwnership(repository, lock, false)
 
       try {
         await unlink(metadataPath)
         await rmdir(repository.layout.repositoryLock)
         await syncDirectory(repository.layout.locks)
-        released = true
+        if (capability) capability.released = true
       } catch {
         throw new RepositoryError(
           'lock',
@@ -235,6 +427,25 @@ export async function acquireRepositoryLock(
       }
     },
   }
+  repositoryLockCapabilities.set(lock, {
+    brand: REPOSITORY_LOCK_BRAND,
+    repository: {
+      path: resolve(repository.path),
+      repositoryId: repository.descriptor.repositoryId,
+      device: repositoryIdentity.dev,
+      inode: repositoryIdentity.ino,
+    },
+    lockDirectory: {
+      path: resolve(repository.layout.repositoryLock),
+      device: lockDirectoryIdentity.dev,
+      inode: lockDirectoryIdentity.ino,
+    },
+    metadataPath,
+    metadataIdentity,
+    metadata,
+    released: false,
+  })
+  return lock
 }
 
 interface QuarantinedLock {
