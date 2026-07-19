@@ -4,21 +4,21 @@
 
 | 字段 | 值 |
 |---|---|
-| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 `8550bd2`；T5 `9245cf7`；T6 accepted working tree，task commit pending |
+| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 `8550bd2`；T5 `9245cf7`；T6 `7bca045`；T7 accepted working tree，task commit pending |
 | Author | anvil-doer / anvil-lead |
 | Review Date | 2026-07-18 |
 | Review Writer | anvil-lead |
-| Status | `APPROVED`（T1-T6 accepted write sets；完整 1.0 MR 仍 active） |
+| Status | `APPROVED`（T1-T7 accepted write sets；完整 1.0 MR 仍 active） |
 
 ## 第一层：3 分钟读懂
 
 ### 1. Review 摘要
 
-- **一句话结论**：T1-T6（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback、legacy 迁移、新 Mac recovery plan/受控安装）均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
+- **一句话结论**：T1-T7（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback、legacy 迁移、新 Mac recovery plan/受控安装、持久调度/通知）均通过最终复核，当前无未解决 Critical / High / Medium finding。
 - **为什么现在要改**：1.0 的备份、验证、恢复和调度都依赖同一个仓库身份、认证加密、锁和操作结果契约；基础错误会向所有后续任务扩散。
 - **交付结果**：除 v1 repository/protection 与 declarative verified backup 外，新增 structural/content verify、healthy retention/status、authenticated staging/apply/rollback、strict legacy 0.1.x read/restore、copy-only migration，以及默认零安装的新 Mac recovery plan 与显式 allowlisted installer resume。
-- **主要影响**：T1-T6 accepted write sets；scheduler、root CLI/package 与 release hardening 仍由 T7-T9 完成。
-- **Reviewer Action**：先看 T6 plan approval/installer lease、directory-bound current inventory 与 fidelity consent，再看 T4 apply/rollback Safety lifecycle；T1-T5 细节见各任务补充。
+- **主要影响**：T1-T7 accepted write sets；root CLI/package 与 release hardening 仍由 T8-T9 完成。
+- **Reviewer Action**：先看 T7 launchd lifecycle、one-shot backup boundary、local history/RPO/notification，再看 T6 installer lease 与 T4 Safety lifecycle；T1-T5 细节见各任务补充。
 
 ### 2. 背景与目标
 
@@ -239,6 +239,79 @@ Operations: 0
 Writes: 0
 Deletes: 0
 Validation: Collect pass; Select no candidates; Rank skip; Inspect Evidence pass for current code/tests; Decide no reusable candidate; Validate pass/not-applicable including plan_drift; Apply skipped; Revalidate skipped because zero-write
+Decision: no-reusable-lesson
+```
+
+### 24. T7 持久调度、历史、degraded 与通知评审补充
+
+#### T7 摘要、边界与结果
+
+- **一句话结论**：T7 将不持久 detached interval worker 替换为用户级 one-shot LaunchAgent；最终 scoped review 无未解决 Critical / High / Medium finding。
+- **Before / After**：从 PID 文件、进程内 interval、legacy backup engine，升级为登录后持续注册的 `launchd` StartInterval job、严格 v1 backup、repository lock、私有有限 history、24h RPO degraded 和本地通知。
+- **Accepted Write Set**：`src/daemon/**`、`src/scheduler/**`、`src/cli/daemon.ts`、`tests/scheduler/**`、daemon integration tests，以及 parent-owned plan/review 状态。
+- **非目标**：scheduler 不执行 retention/destructive maintenance、migration、apply、rollback、recovery installer 或任意 shell；root CLI 统一平台门禁和 release package 由 T8 完成。
+
+#### T7 需求—实现—验证映射
+
+| Requirement / Success Criterion | Implementation | Verification | 状态 |
+|---|---|---|---|
+| FR-16 默认 12h / `0` disabled | config interval 转确定性 `StartInterval`；`0` start 主动 bootout/remove；stale worker 再次检查 disabled | plist、CLI disabled/idempotency tests | verified |
+| 登录/重启后持续 | `~/Library/LaunchAgents/com.ssbun.restore-cli.scheduler.plist`；`RunAtLoad` + `StartInterval`；worker 每次单次运行后退出 | deterministic plist + `plutil -lint` + injected bootstrap/bootout/print tests | verified |
+| 同仓库不重叠 | one-shot worker 仅调用 `createV1RecoveryPoint`，由现有 repository backup lease 仲裁；launchd 同 label 不并发启动 | dependency boundary、lock-result preservation/notification tests | verified |
+| 目标缺失不建替代路径 | 对 exact repository path 只做 `lstat`；失败在 plugin prepare / backup service 前返回 | missing-target test 断言 prepare/create 均零调用 | verified |
+| 24h degraded | 实际 authenticated repository status 优先；bounded history fallback；严格 `> 24h` 边界 | exact boundary、stale/no healthy、status failure tests | verified |
+| 有限本地 history | 0700 state/history、0600 final records、strict schema、64KiB/file、100 final records、atomic pending→final、目录 fsync | rotation、mode、malformed/symlink/unknown-key tests | verified |
+| 无人值守通知 | fixed `/usr/bin/osascript` JXA，无 shell；generic bounded message；failure/degraded/target-change/content-verify/notification failure 可见 | command allowlist/control-byte、classified failure tests | verified |
+| 禁止自动高风险动作 | scheduler dependency surface 只有 config、target read、v1 backup、read-only status、local history、notification | source audit 无 migration/apply/install/retention/shell | verified |
+
+#### T7 Findings 闭环与复核结果
+
+| Finding / 风险 | Severity | 修复 / 证据 | 最终状态 |
+|---|---|---|---|
+| detached child 在 CLI 退出/登录重启后不可靠 | High | 持久 LaunchAgent + deterministic plist + one-shot worker | fixed |
+| launchctl 无法执行时可能误报 stopped | High | command result 区分 service nonzero 与 execution error；stop/status fail closed | fixed |
+| 缺盘时可能创建本地同名 repository | High | exact no-follow `lstat` gate；无 mkdir/prepare/write | fixed |
+| history/plist symlink 与发布竞态 | High / Medium | `O_NOFOLLOW`、held directory/file identity、exclusive pending、atomic rename、fsync、strict bounded parse | fixed |
+| auth/target failure 丢失上次 healthy 时间并立即误判 | Medium | authenticated status 非空才替换；local latest-healthy fallback；当前 verified point fallback | fixed |
+| 已发布 healthy point 因 lock release degraded 被漏记 | Medium | status-confirmed latest healthy ID 可独立于 operation state 标记 publication | fixed |
+| osascript 通知命令不具 Standard Additions | Medium | fixed JXA 启用 `includeStandardAdditions`；title/body bounded/control sanitized | fixed |
+| 全量高并发慢测触发现有硬编码 timeout | Low / test harness | 两项均 isolated pass；最终 3-worker / 60s global clean 421/421，migration 自身 15s gate 未放宽 | verified non-regression |
+
+#### T7 自动化、风险与 ReviewerContribution
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Focused | PASS | scheduler/daemon/status 11 files / 41 tests |
+| Full regression | PASS | 52 files / 421 tests；3 workers，global 60s；existing migration explicit 15s gate preserved |
+| Type / Build | PASS | `pnpm typecheck`；`pnpm build`；built worker/scheduler artifacts present |
+| Lint / Diff | PASS | direct Biome 20 affected + 156 whole-repo files；`git diff --check` |
+| Native contract | PASS | local `launchctl help` signatures；generated plist `plutil -lint` OK；tests inject launchctl and never touch real LaunchAgents |
+| Security / Scope | PASS | fixed executables、no shell、generic notifications、bounded no-follow local state、target zero-write preflight、backup-only dependency surface |
+
+- **回滚**：bootout/remove LaunchAgent 后 revert T7 task commit；保留 bounded scheduler history 供诊断，不删除 repository recovery points。
+- **观测**：每个 scheduled run 输出/记录 start/end/duration/state/category/point/healthy/RPO/issue/notification；`daemon status` 显示 installed/loaded/next/RPO/history。
+- **Known limitation**：next schedule 是基于 LaunchAgent interval 和最近 start 的确定性估算；macOS 最终触发时间仍由 launchd 的 sleep/wake coalescing 决定。Node stdlib 无 `openat`，因此本地 state/plist 采用 no-follow descriptor 与 dev/ino 重检并 fail closed。
+- **Knowledge Impact**：none；当前结论为本项目 scheduler contract 的实现特定 hardening，zero-write compound。
+
+| Reviewer | Role | Scope | Findings | Verification | Knowledge Impact |
+|---|---|---|---|---|---|
+| implementation | T7 code/test implementation | launchd/history/run/status/notification/daemon CLI | 关闭全部 scoped findings | 41 focused / 421 full | none |
+| anvil-lead | scoped final arbiter | MRD/plan trace、security boundary、fault evidence、task ownership | APPROVED；0 open C/H/M | type/build/Biome/diff/plutil/full | none |
+
+#### T7 CompoundResultV2
+
+```text
+Action: submit
+Mode: apply
+Scope: T7 persistent launchd scheduling, bounded local history, degraded state and notification
+Candidates: 0
+Active: 0
+Draft: 0
+Conflicts: 0
+Operations: 0
+Writes: 0
+Deletes: 0
+Validation: Collect pass; Select no candidates because no knowledge root exists; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
 Decision: no-reusable-lesson
 ```
 

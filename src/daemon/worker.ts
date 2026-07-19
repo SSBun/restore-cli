@@ -1,18 +1,10 @@
-import { removePidFile, writePidFile } from './lifecycle.js'
-import { createDaemonTick } from './tick.js'
+import { runScheduledBackup } from '../scheduler/run.js'
 
-writePidFile()
-
-const intervalMs = Number(process.env.RESTORE_INTERVAL) || 12 * 60 * 60 * 1000
-const tick = createDaemonTick()
-
-tick()
-const interval = setInterval(tick, intervalMs)
-
-process.on('SIGTERM', () => {
-  clearInterval(interval)
-  removePidFile()
-  process.exit(0)
-})
-
-process.on('SIGINT', () => process.exit(0))
+try {
+  const result = await runScheduledBackup()
+  process.stdout.write(`${JSON.stringify(result)}\n`)
+  process.exitCode = result.state === 'success' ? 0 : result.state === 'warning' ? 2 : 1
+} catch {
+  process.stderr.write('scheduled-backup: SCHEDULER_RUN_FAILED\n')
+  process.exitCode = 1
+}

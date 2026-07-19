@@ -1,56 +1,81 @@
 import { Command } from 'commander'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerDaemonCommand } from '../../src/cli/daemon.js'
-import { startDaemon } from '../../src/daemon/scheduler.js'
+import type { Config } from '../../src/config/types.js'
 
-vi.mock('../../src/config/loader.js', () => ({
-  loadConfig: () => ({
-    destination: { name: 'local', path: '/tmp/restore', type: 'local' },
-    plugins: [],
-    daemon: { intervalHours: 0 },
-    maxSnapshots: 14,
-  }),
-}))
-
-vi.mock('../../src/daemon/lifecycle.js', () => ({
-  isDaemonRunning: () => false,
-}))
-
-vi.mock('../../src/daemon/scheduler.js', () => ({
-  startDaemon: vi.fn(),
-  stopDaemon: vi.fn(),
-}))
-
-function createProgram(output: string[]): Command {
-  const program = new Command()
-  program.exitOverride()
-  program.configureOutput({
-    writeOut: (text) => output.push(text),
-    writeErr: (text) => output.push(text),
-  })
-  registerDaemonCommand(program)
-  return program
+const config: Config = {
+  destination: { name: 'local', path: '/tmp/restore', type: 'local' },
+  plugins: [],
+  daemon: { intervalHours: 0 },
+  maxSnapshots: 14,
 }
 
 describe('daemon command', () => {
+  const output: string[] = []
+  const start = vi.fn(async () => ({ installed: true, loaded: true }))
+  const stop = vi.fn(async () => ({ installed: false, loaded: false }))
+  const status = vi.fn()
+  const setExitCode = vi.fn()
+
+  function program(load = () => config): Command {
+    const value = new Command()
+    value.exitOverride()
+    registerDaemonCommand(value, {
+      load,
+      start,
+      stop,
+      status,
+      launchDefinition: (intervalHours) => ({
+        executable: '/usr/local/bin/node',
+        arguments: ['/tmp/worker.js'],
+        intervalHours,
+      }),
+      writeStdout: (text) => output.push(text),
+      writeStderr: (text) => output.push(text),
+      setExitCode,
+    })
+    return value
+  }
+
   beforeEach(() => {
+    output.length = 0
     vi.clearAllMocks()
   })
 
-  it('does not start the daemon when interval is 0', async () => {
-    const output: string[] = []
-    const consoleLog = vi
-      .spyOn(console, 'log')
-      .mockImplementation((message) => output.push(message))
+  it('actively removes a stale LaunchAgent when interval 0 disables scheduling', async () => {
+    await program().parseAsync(['node', 'test', 'daemon', 'start'])
+    expect(start).not.toHaveBeenCalled()
+    expect(stop).toHaveBeenCalledOnce()
+    expect(JSON.parse(output.at(-1) ?? '{}')).toMatchObject({
+      operation: 'scheduler-start',
+      enabled: false,
+      state: 'success',
+    })
+  })
 
-    try {
-      const program = createProgram(output)
-      await program.parseAsync(['node', 'test', 'daemon', 'start'])
-    } finally {
-      consoleLog.mockRestore()
-    }
+  it('installs the persistent worker with the configured interval', async () => {
+    await program(() => ({ ...config, daemon: { intervalHours: 12 } })).parseAsync([
+      'node',
+      'test',
+      'daemon',
+      'start',
+    ])
+    expect(start).toHaveBeenCalledWith({
+      executable: '/usr/local/bin/node',
+      arguments: ['/tmp/worker.js'],
+      intervalHours: 12,
+    })
+  })
 
-    expect(startDaemon).not.toHaveBeenCalled()
-    expect(output.join('')).toContain('disabled')
+  it('returns a stable failure without throwing when configuration is invalid', async () => {
+    await program(() => {
+      throw new Error('invalid')
+    }).parseAsync(['node', 'test', 'daemon', 'status'])
+    expect(JSON.parse(output.at(-1) ?? '{}')).toMatchObject({
+      operation: 'scheduler-status',
+      state: 'failure',
+      category: 'configuration',
+    })
+    expect(setExitCode).toHaveBeenCalledWith(10)
   })
 })
