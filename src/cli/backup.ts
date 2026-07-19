@@ -8,6 +8,7 @@ import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
 import { createOperationResult } from '../repository/index.js'
 import type { OperationCategory, OperationResult } from '../repository/index.js'
+import { emitCliResult } from '../util/result.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -110,12 +111,12 @@ export function registerBackupCommand(
             ? { beforeCapture: async () => dependencies.prepare(resolved.plugins) }
             : {}),
         })
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES[result.category])
       } catch {
         const result = cliFailure(phase, startedAt, repositoryId)
         dependencies.writeStderr(`backup: ${result.issues[0]?.code ?? 'BACKUP_SERVICE_FAILED'}`)
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES[result.category])
       }
     })

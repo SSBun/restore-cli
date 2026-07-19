@@ -13,6 +13,7 @@ import {
   syncDirectory,
   writeDurableExclusiveFile,
 } from '../repository/io.js'
+import { emitCliResult } from '../util/result.js'
 
 interface InitializeCommandOptions {
   plaintext?: boolean
@@ -155,6 +156,36 @@ function safeErrorMessage(error: unknown): string {
   return 'Repository command failed'
 }
 
+function failureResult(operation: string, error: unknown, startedAt: string) {
+  const endedAt = new Date().toISOString()
+  const category =
+    error instanceof RepositoryError
+      ? error.category
+      : error instanceof ProtectionError
+        ? 'authentication'
+        : 'internal'
+  const code =
+    error instanceof RepositoryError || error instanceof ProtectionError
+      ? error.code
+      : 'REPOSITORY_COMMAND_FAILED'
+  return {
+    operation,
+    state: 'failure',
+    category,
+    startedAt,
+    endedAt,
+    issues: [
+      {
+        code,
+        category,
+        message: safeErrorMessage(error),
+        nextAction: 'Inspect the repository diagnostics and retry safely',
+      },
+    ],
+    nextAction: 'Inspect the repository diagnostics and retry safely',
+  }
+}
+
 function parseRequiredBytes(value: string): bigint {
   if (!/^\d+$/.test(value)) {
     throw new RepositoryError(
@@ -177,6 +208,7 @@ export function registerRepositoryCommand(program: Command): void {
     .option('--recovery-file <path>', 'new file for the independent recovery credential')
     .option('--required-bytes <bytes>', 'minimum available capacity required', '0')
     .action(async (destination: string, options: InitializeCommandOptions) => {
+      const startedAt = new Date().toISOString()
       const protection = options.plaintext ? 'plaintext' : 'encrypted'
       let preparedRecoveryExport: PreparedRecoveryCredentialExport | undefined
       let initialized = false
@@ -224,26 +256,29 @@ export function registerRepositoryCommand(program: Command): void {
           exportRecoveryCredential: preparedRecoveryExport?.exportCredential,
         })
         initialized = true
-        console.log(
-          JSON.stringify({
-            operation: 'repository-init',
-            state: 'success',
-            repositoryId: result.repositoryId,
-            repositoryPath: result.repositoryPath,
-            protection: result.protection,
-            targetIdentity: result.targetIdentity,
-            availableBytes: result.availableBytes,
-            requiredBytes: requiredBytes.toString(),
-            recoveryCredentialExported: result.recoveryCredentialExported,
-          }),
-        )
+        emitCliResult(program, console.log, {
+          operation: 'repository-init',
+          state: 'success',
+          category: 'success',
+          startedAt,
+          endedAt: new Date().toISOString(),
+          repositoryId: result.repositoryId,
+          repositoryPath: result.repositoryPath,
+          protection: result.protection,
+          targetIdentity: result.targetIdentity,
+          availableBytes: result.availableBytes,
+          requiredBytes: requiredBytes.toString(),
+          recoveryCredentialExported: result.recoveryCredentialExported,
+        })
       } catch (error) {
         if (preparedRecoveryExport && !initialized) {
           try {
             await preparedRecoveryExport.cleanup()
           } catch {}
         }
-        console.error(safeErrorMessage(error))
+        const result = failureResult('repository-init', error, startedAt)
+        console.error(`repository-init: ${result.issues[0].code}`)
+        emitCliResult(program, console.log, result)
         process.exitCode = exitCode(error)
       }
     })
@@ -256,6 +291,7 @@ export function registerRepositoryCommand(program: Command): void {
     .requiredOption('--protection <mode>', 'expected protection mode: encrypted or plaintext')
     .action(
       async (repositoryPath: string, options: { repositoryId: string; protection: string }) => {
+        const startedAt = new Date().toISOString()
         try {
           if (options.protection !== 'encrypted' && options.protection !== 'plaintext') {
             throw new RepositoryError(
@@ -269,18 +305,25 @@ export function registerRepositoryCommand(program: Command): void {
             expectedRepositoryId: options.repositoryId,
             expectedProtection: options.protection,
           })
-          console.log(
-            JSON.stringify({
+          try {
+            emitCliResult(program, console.log, {
               operation: 'repository-inspect',
               state: 'success',
+              category: 'success',
+              startedAt,
+              endedAt: new Date().toISOString(),
               repositoryId: handle.descriptor.repositoryId,
               repositoryPath: handle.path,
               protection: handle.descriptor.protection,
               availableBytes: handle.preflight.availableBytes.toString(),
-            }),
-          )
+            })
+          } finally {
+            await handle.close()
+          }
         } catch (error) {
-          console.error(safeErrorMessage(error))
+          const result = failureResult('repository-inspect', error, startedAt)
+          console.error(`repository-inspect: ${result.issues[0].code}`)
+          emitCliResult(program, console.log, result)
           process.exitCode = exitCode(error)
         }
       },

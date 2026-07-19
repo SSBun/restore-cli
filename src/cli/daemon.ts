@@ -7,6 +7,7 @@ import type { OperationCategory } from '../repository/index.js'
 import type { LaunchAgentDefinition } from '../scheduler/launchd.js'
 import { getSchedulerStatus } from '../scheduler/status.js'
 import type { LaunchAgentStatus } from '../scheduler/types.js'
+import { emitCliResult } from '../util/result.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -101,7 +102,7 @@ export function registerDaemonCommand(
             launchAgent,
             issues: [],
           }
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(0)
           return
         }
@@ -117,12 +118,12 @@ export function registerDaemonCommand(
           launchAgent,
           issues: [],
         }
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(0)
       } catch {
         const result = commandFailure('scheduler-start', 'SCHEDULER_START_FAILED', phase)
         dependencies.writeStderr('daemon start: SCHEDULER_START_FAILED')
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES[phase])
       }
     })
@@ -133,21 +134,19 @@ export function registerDaemonCommand(
     .action(async () => {
       try {
         const launchAgent = await dependencies.stop()
-        dependencies.writeStdout(
-          JSON.stringify({
-            operation: 'scheduler-stop',
-            state: 'success',
-            category: 'success',
-            enabled: false,
-            launchAgent,
-            issues: [],
-          }),
-        )
+        emitCliResult(program, dependencies.writeStdout, {
+          operation: 'scheduler-stop',
+          state: 'success',
+          category: 'success',
+          enabled: false,
+          launchAgent,
+          issues: [],
+        })
         dependencies.setExitCode(0)
       } catch {
         const result = commandFailure('scheduler-stop', 'SCHEDULER_STOP_FAILED', 'internal')
         dependencies.writeStderr('daemon stop: SCHEDULER_STOP_FAILED')
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES.internal)
       }
     })
@@ -164,12 +163,12 @@ export function registerDaemonCommand(
         if (result.issues.length > 0) {
           dependencies.writeStderr(`daemon status: ${result.issues[0]?.code}`)
         }
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES[result.category])
       } catch {
         const result = commandFailure('scheduler-status', 'SCHEDULER_STATUS_FAILED', phase)
         dependencies.writeStderr('daemon status: SCHEDULER_STATUS_FAILED')
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES[phase])
       }
     })

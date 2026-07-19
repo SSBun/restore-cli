@@ -9,6 +9,7 @@ import type {
   RollbackOptions,
 } from '../recovery/index.js'
 import type { OperationCategory } from '../repository/index.js'
+import { emitCliResult } from '../util/result.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -116,14 +117,14 @@ function dryRun(values: { execute?: boolean; dryRun?: boolean }): boolean {
   return values.execute !== true
 }
 
-/** V1 command registration is intentionally not root-wired until the T8 CLI integration task. */
 export function registerV1ApplyCommands(
   program: Command,
   overrides: Partial<ApplyV1CommandDependencies> = {},
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
   program
-    .command('apply-v1')
+    .command('apply')
+    .alias('apply-v1')
     .description('Dry-run or explicitly apply verified v1 staging')
     .option('--repository <path>')
     .option('--repository-id <id>')
@@ -180,19 +181,20 @@ export function registerV1ApplyCommands(
           }
           const result = await dependencies.apply(options)
           if (result.issues[0]) dependencies.writeStderr(`apply-v1: ${result.issues[0].code}`)
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           const result = failure('apply', startedAt)
           dependencies.writeStderr('apply-v1: APPLY_CONFIGURATION_INVALID')
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.configuration)
         }
       },
     )
 
   program
-    .command('rollback-v1')
+    .command('rollback')
+    .alias('rollback-v1')
     .description('Dry-run or explicitly rollback one durable Safety Point')
     .option('--repository <path>')
     .option('--repository-id <id>')
@@ -225,12 +227,12 @@ export function registerV1ApplyCommands(
           }
           const result = await dependencies.rollback(options)
           if (result.issues[0]) dependencies.writeStderr(`rollback-v1: ${result.issues[0].code}`)
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           const result = failure('rollback', startedAt)
           dependencies.writeStderr('rollback-v1: ROLLBACK_CONFIGURATION_INVALID')
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.configuration)
         }
       },

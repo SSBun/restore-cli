@@ -240,6 +240,13 @@ Writes: 0
 Deletes: 0
 Validation: Collect pass; Select no candidates; Rank skip; Inspect Evidence pass for current code/tests; Decide no reusable candidate; Validate pass/not-applicable including plan_drift; Apply skipped; Revalidate skipped because zero-write
 Decision: no-reusable-lesson
+
+#### T8 Review
+
+- **范围**：root CLI registration, stable JSON/human output, Apple Silicon/macOS gate, package metadata, README and offline recovery checklist.
+- **Verification**：`pnpm typecheck` PASS; `pnpm build` PASS; direct Biome PASS; `npm pack --dry-run --json` PASS for `@ssbun/restore-cli@1.0.0`; full Vitest invoked with 3 workers (no emitted failures).
+- **Release check**：npm currently publishes `0.1.2`; GitHub remote is `git@github.com:SSBun/restore-cli.git`.
+- **Decision**：T8 accepted; T9 fault hardening remains.
 ```
 
 ### 24. T7 持久调度、历史、degraded 与通知评审补充

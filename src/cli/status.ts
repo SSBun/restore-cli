@@ -10,6 +10,7 @@ import type { CredentialProvider } from '../protection/index.js'
 import type { OperationCategory } from '../repository/index.js'
 import { info } from '../util/log.js'
 import { getBackupRoot } from '../util/path.js'
+import { emitCliResult } from '../util/result.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -121,7 +122,7 @@ export function registerStatusCommand(
           nextAction: 'Validate or initialize Restore configuration',
         }
         dependencies.writeStderr('status: STATUS_CONFIGURATION_INVALID')
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES.configuration)
         return
       }
@@ -142,7 +143,7 @@ export function registerStatusCommand(
           if (result.issues.length > 0) {
             dependencies.writeStderr(`status: ${result.issues[0]?.code ?? 'STATUS_DEGRADED'}`)
           }
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           dependencies.writeStderr('status: STATUS_SERVICE_FAILED')
@@ -187,7 +188,7 @@ export function registerStatusCommand(
             ],
             nextAction: 'Run structural verification and inspect repository diagnostics',
           }
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.internal)
         }
         return
@@ -201,6 +202,45 @@ export function registerStatusCommand(
           : dependencies.daemonRunning()
             ? 'running'
             : 'stopped'
+
+      if (program.opts<{ json?: boolean }>().json) {
+        const now = new Date().toISOString()
+        emitCliResult(program, dependencies.writeStdout, {
+          operation: 'status',
+          state: 'success',
+          category: 'success',
+          startedAt: now,
+          endedAt: now,
+          repositoryId: null,
+          repositoryLocation: stat.backupRoot,
+          protection: null,
+          target: { state: 'available', capabilities: null },
+          scheduler: {
+            configured: config.daemon.intervalHours > 0,
+            state: daemonState,
+            intervalHours: config.daemon.intervalHours,
+            nextScheduledAt: null,
+          },
+          recoveryPoints: {
+            healthy: stat.snapshotCount,
+            partial: 0,
+            failed: 0,
+            latestId: stat.lastBackupName,
+            latestHealthyId: stat.lastBackupName,
+            latestHealthyAt: stat.lastBackupAt?.toISOString() ?? null,
+          },
+          rpo: {
+            ageMs: stat.lastBackupAt ? Date.now() - stat.lastBackupAt.getTime() : null,
+            degradedAfterMs: 86_400_000,
+            degraded: !stat.lastBackupAt || Date.now() - stat.lastBackupAt.getTime() > 86_400_000,
+          },
+          verification: { structural: null, content: null },
+          recentOperations: [],
+          issues: [],
+          nextAction: null,
+        })
+        return
+      }
 
       info(`Destination: ${config.destination.name}`)
       info(`Backup root: ${stat.backupRoot}`)

@@ -23,6 +23,7 @@ import { RecoveryFailure } from '../recovery/index.js'
 import { RepositoryError, getRepositoryLayout } from '../repository/index.js'
 import type { OperationCategory, ProtectionMode } from '../repository/index.js'
 import { readBoundedRegularFile } from '../repository/io.js'
+import { emitCliResult } from '../util/result.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -267,7 +268,6 @@ interface RecoverCliValues {
   stateDirectory?: string
 }
 
-/** Defined for T8 root wiring; this module does not register itself globally. */
 export function registerRecoverCommand(
   program: Command,
   overrides: Partial<RecoverCommandDependencies> = {},
@@ -360,7 +360,7 @@ export function registerRecoverCommand(
       if (output.category !== 'success') {
         dependencies.writeStderr(`recover: ${output.issues[0]?.code ?? 'RECOVERY_FAILED'}`)
       }
-      dependencies.writeStdout(JSON.stringify(output))
+      emitCliResult(program, dependencies.writeStdout, output)
       dependencies.setExitCode(EXIT_CODES[output.category])
     })
 }

@@ -6,6 +6,7 @@ import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
 import type { OperationCategory, ProtectionMode } from '../repository/index.js'
 import { getBackupRoot } from '../util/path.js'
+import { emitCliResult } from '../util/result.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -179,7 +180,6 @@ function collect(value: string, previous: string[]): string[] {
   return [...previous, value]
 }
 
-/** Defined for T8 root wiring; this module does not register itself globally. */
 export function registerMigrateCommand(
   program: Command,
   overrides: Partial<MigrateCommandDependencies> = {},
@@ -199,7 +199,7 @@ export function registerMigrateCommand(
       } catch {
         result = configurationFailure(values.from)
         dependencies.writeStderr('migrate: MIGRATION_CONFIGURATION_INVALID')
-        dependencies.writeStdout(JSON.stringify(result))
+        emitCliResult(program, dependencies.writeStdout, result)
         dependencies.setExitCode(EXIT_CODES.configuration)
         return
       }
@@ -224,7 +224,7 @@ export function registerMigrateCommand(
           'MIGRATION_FAILED'
         dependencies.writeStderr(`migrate: ${code}`)
       }
-      dependencies.writeStdout(JSON.stringify(result))
+      emitCliResult(program, dependencies.writeStdout, result)
       dependencies.setExitCode(EXIT_CODES[result.category])
     })
 }

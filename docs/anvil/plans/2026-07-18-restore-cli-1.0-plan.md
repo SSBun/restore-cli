@@ -476,7 +476,7 @@ graph TD
 | T5 | completed | strict 0.1.x read/restore + copy-only v1 migration; 76 focused and 326 total tests pass; final review APPROVED |
 | T6 | completed | authenticated new-Mac plan, default missing-app report, controlled allowlisted installers; 68 focused and 399 total tests pass; final review APPROVED |
 | T7 | completed | persistent one-shot launchd scheduling; private bounded local history; 24h degraded state; fixed-path local notifications; 41 focused and 421 full tests pass |
-| T8 | in progress | root CLI automation contract, Apple Silicon gate, package/release docs starting |
+| T8 | completed | root CLI automation contract, Apple Silicon gate, package 1.0.0 metadata, recovery docs; typecheck/build/Biome/package dry-run pass |
 | T9 | pending | — |
 
 ## 通过条件

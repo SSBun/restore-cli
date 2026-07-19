@@ -12,6 +12,7 @@ import type { RecoveryResult, RecoverySelection, StageRecoveryOptions } from '..
 import type { OperationCategory } from '../repository/index.js'
 import { error, info } from '../util/log.js'
 import { getBackupRoot } from '../util/path.js'
+import { emitCliResult } from '../util/result.js'
 
 function printRestorePlan(files: { relativePath: string; destinationPath: string }[]): void {
   info(`Restore plan (${files.length} files):`)
@@ -22,8 +23,8 @@ function printRestorePlan(files: { relativePath: string; destinationPath: string
 
 export function registerRestoreCommand(program: Command): void {
   program
-    .command('restore')
-    .description('Restore files from a backup snapshot')
+    .command('legacy-restore')
+    .description('Compatibility restore from a read-only 0.1.x snapshot')
     .option('--snapshot <name>', 'Snapshot name to restore from')
     .option('--list', 'List available snapshots')
     .option('--dry-run', 'Show what would be restored without copying')
@@ -183,14 +184,14 @@ function failedV1Result(startedAt: string): RecoveryResult {
   }
 }
 
-/** V1 command registration is intentionally not root-wired until the T8 CLI integration task. */
 export function registerV1RestoreCommand(
   program: Command,
   overrides: Partial<RestoreV1CommandDependencies> = {},
 ): void {
   const dependencies = { ...DEFAULT_V1_DEPENDENCIES, ...overrides }
   program
-    .command('restore-v1')
+    .command('restore')
+    .alias('restore-v1')
     .description('Restore an authenticated v1 recovery point into isolated staging')
     .option('--repository <path>', 'existing RestoreBackup repository path')
     .option('--repository-id <id>', 'expected immutable repository ID')
@@ -267,12 +268,12 @@ export function registerV1RestoreCommand(
           }
           const result = await dependencies.stage(options)
           if (result.issues[0]) dependencies.writeStderr(`restore-v1: ${result.issues[0].code}`)
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(V1_EXIT_CODES[result.category])
         } catch {
           const result = failedV1Result(startedAt)
           dependencies.writeStderr('restore-v1: RESTORE_CONFIGURATION_INVALID')
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(V1_EXIT_CODES.configuration)
         }
       },

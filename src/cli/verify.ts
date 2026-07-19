@@ -4,6 +4,7 @@ import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
 import type { OperationCategory } from '../repository/index.js'
 import { getBackupRoot } from '../util/path.js'
+import { emitCliResult } from '../util/result.js'
 import { verifyV1Repository } from '../verify/index.js'
 import type { VerificationReport, VerificationSelector } from '../verify/index.js'
 
@@ -148,12 +149,12 @@ export function registerVerifyCommand(
           })
           if (result.issues.length > 0)
             dependencies.writeStderr(`verify: ${result.issues[0]?.code}`)
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           const result = configurationFailure(startedAt)
           dependencies.writeStderr('verify: VERIFY_CONFIGURATION_INVALID')
-          dependencies.writeStdout(JSON.stringify(result))
+          emitCliResult(program, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.configuration)
         }
       },
