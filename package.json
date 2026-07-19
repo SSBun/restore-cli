@@ -24,7 +24,7 @@
     "url": "git+https://github.com/ssbun/restore-cli.git"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -R src/plugin/scripts dist/plugin/scripts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -R src/plugin/scripts dist/plugin/scripts && chmod +x dist/index.js",
     "dev": "tsc -p tsconfig.build.json --watch",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
