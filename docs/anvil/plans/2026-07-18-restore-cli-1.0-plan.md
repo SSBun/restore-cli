@@ -396,15 +396,15 @@ graph TD
 - **Parallel Group**：G6
 - **Execution**：serial
 - **Parallel Blocker**：共享 CLI/operation result 与 inventory code
-- **Ownership**：`src/recovery-plan/**`、`src/cli/recover.ts`、inventory runner 相关文件和测试
+- **Ownership**：`src/recovery-plan/**`、`src/cli/recover.ts`、`tests/recovery-plan/**`；以及 T6 安全闭环所需的最小共享改动：`src/cli/apply.ts`、`src/protection/{index,recovery}.ts`、`src/repository/io.ts`、`src/recovery/{apply,index,stage,types}.ts`、`tests/recovery/{cli-recovery,recovery}.test.ts`、`tests/repository/{protection,safe-reads}.test.ts`
 - **Read Set**：T4、内置 Homebrew/VS Code/Raycast/mac-app inventory
-- **Write Set**：`src/recovery-plan/**`、`src/cli/recover.ts`、inventory runner 相关文件和测试
+- **Write Set**：Ownership 全部；共享文件只允许增加 opt-in 原路径/staging 重叠预检、稳定 `RecoveryFailure` 导出/归类、byte-oriented recovery credential 读取、apply fidelity 精确确认/指纹绑定及其回归测试，不得改变普通 T4 staging/apply 的无 issue 默认路径
 - **描述**：空白 profile recovery plan、当前/point inventory diff、默认 missing report、显式 allowlisted installer dry-run/execute/resume；manual-only 分类。
 - **成功标准**：默认零安装；daemon 不可触发；显式 install 只执行 allowlist；DMG/App Store/未知项 manual；中断可从 failed/pending 继续。
 - **验证**：recovery-plan 单元/集成、shell syntax、typecheck/lint/build。
 - **预估 Token**：50k
 - **依赖**：T4
-- **涉及文件**：Ownership 全部。
+- **涉及文件**：Ownership 全部；共享 recovery 改动必须保持 opt-in，且在创建任何 staging 子项前完成 canonical/requested 双向重叠检查；有 fidelity issue 的 execute apply 必须在任何 Safety Point/原路径写入前要求精确 consent。
 - **执行指令**：不创建 installer framework；允许列表从现有 inventory 显式映射。
 
 ### T7：持久调度、历史与通知
@@ -474,8 +474,8 @@ graph TD
 | T3 | completed | verify/retention/status closure; 29 focused and 239 full tests pass; final review APPROVED |
 | T4 | completed | staging/apply/rollback closure; 58 recovery and 297 total tests pass; final review APPROVED |
 | T5 | completed | strict 0.1.x read/restore + copy-only v1 migration; 76 focused and 326 total tests pass; final review APPROVED |
-| T6 | in progress | new Mac recovery plan and explicit allowlisted installation starting |
-| T7 | pending | — |
+| T6 | completed | authenticated new-Mac plan, default missing-app report, controlled allowlisted installers; 68 focused and 399 total tests pass; final review APPROVED |
+| T7 | in progress | persistent launchd scheduling, bounded history, degraded status, and local notifications starting |
 | T8 | pending | — |
 | T9 | pending | — |
 

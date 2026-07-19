@@ -13,6 +13,7 @@ import {
   listOperationResults,
   openRepository,
 } from '../../src/repository/index.js'
+import { readBoundedRegularFile } from '../../src/repository/io.js'
 
 const run = promisify(execFile)
 const temporaryDirectories: string[] = []
@@ -48,6 +49,21 @@ afterEach(async () => {
 })
 
 describe('bounded no-follow repository reads', () => {
+  it('returns one caller-owned bounded buffer and rejects oversized content', async () => {
+    const root = await target('restore-safe-owned-buffer-')
+    const path = join(root, 'credential.bin')
+    await writeFile(path, Buffer.from('sensitive-bytes'))
+    const content = await readBoundedRegularFile(path, 64)
+    expect(content.toString('utf8')).toBe('sensitive-bytes')
+    content.fill(0)
+    expect([...content]).toSatisfy((values: number[]) => values.every((value) => value === 0))
+
+    await writeFile(path, Buffer.alloc(65, 1))
+    await expect(readBoundedRegularFile(path, 64)).rejects.toThrow(
+      'File is missing, unsafe, not regular, or exceeds the permitted size',
+    )
+  })
+
   it('rejects descriptor symlinks and FIFOs without following or blocking', async () => {
     const symlinkTarget = await target('restore-safe-descriptor-link-')
     const linked = await initializeRepository({

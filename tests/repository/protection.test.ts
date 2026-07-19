@@ -7,6 +7,7 @@ import {
   generateMasterKey,
   generateRecoverySecret,
   importRecoverySecret,
+  importRecoverySecretBytes,
   unlockWithRecoveryCredential,
   unwrapMasterKey,
   wrapMasterKey,
@@ -110,5 +111,28 @@ describe('recovery credential wrapping', () => {
     imported.dispose()
     unwrapped.dispose()
     wrongSecret.dispose()
+  })
+
+  it('imports exact recovery credential bytes without a secret-bearing JS string', async () => {
+    const source = generateRecoverySecret()
+    const material = Buffer.from(exportRecoverySecret(source), 'ascii')
+    const imported = importRecoverySecretBytes(material)
+    const masterKey = generateMasterKey()
+    const wrapped = await wrapMasterKey(blobContext.repositoryId, masterKey, imported)
+    const unwrapped = await unwrapMasterKey(blobContext.repositoryId, wrapped, imported)
+    expect(masterKey.equals(unwrapped)).toBe(true)
+
+    const nonCanonical = Buffer.from(material)
+    nonCanonical[nonCanonical.length - 1] = 95
+    await expect(() => importRecoverySecretBytes(nonCanonical)).toThrow(
+      ProtectionAuthenticationError,
+    )
+
+    material.fill(0)
+    nonCanonical.fill(0)
+    source.dispose()
+    imported.dispose()
+    masterKey.dispose()
+    unwrapped.dispose()
   })
 })

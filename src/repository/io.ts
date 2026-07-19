@@ -20,11 +20,13 @@ export async function readBoundedRegularFile(path: string, maxBytes: number): Pr
     throw new SafeFileError()
   }
 
+  let content: Buffer | undefined
+  let transferred = false
   try {
     const fileStat = await file.stat()
     if (!fileStat.isFile() || fileStat.size > maxBytes) throw new SafeFileError()
 
-    const content = Buffer.allocUnsafe(maxBytes + 1)
+    content = Buffer.alloc(maxBytes + 1)
     let length = 0
     while (length <= maxBytes) {
       const { bytesRead } = await file.read(content, length, maxBytes + 1 - length, null)
@@ -32,11 +34,14 @@ export async function readBoundedRegularFile(path: string, maxBytes: number): Pr
       length += bytesRead
     }
     if (length > maxBytes) throw new SafeFileError()
-    return Buffer.from(content.subarray(0, length))
+    const result = content.subarray(0, length)
+    transferred = true
+    return result
   } catch (error) {
     if (error instanceof SafeFileError) throw error
     throw new SafeFileError()
   } finally {
+    if (!transferred) content?.fill(0)
     await file.close().catch(() => {})
   }
 }

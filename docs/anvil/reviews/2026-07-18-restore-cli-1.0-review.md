@@ -4,21 +4,21 @@
 
 | 字段 | 值 |
 |---|---|
-| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 `8550bd2`；T5 accepted working tree，task commit pending |
+| MR / Commit | T1 `87ef202`；T2 `c932b57`；T3 `f27abad`；T4 `8550bd2`；T5 `9245cf7`；T6 accepted working tree，task commit pending |
 | Author | anvil-doer / anvil-lead |
 | Review Date | 2026-07-18 |
 | Review Writer | anvil-lead |
-| Status | `APPROVED`（T1-T5 accepted write sets；完整 1.0 MR 仍 active） |
+| Status | `APPROVED`（T1-T6 accepted write sets；完整 1.0 MR 仍 active） |
 
 ## 第一层：3 分钟读懂
 
 ### 1. Review 摘要
 
-- **一句话结论**：T1-T5（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback、legacy 读取/复制迁移）均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
+- **一句话结论**：T1-T6（仓库/保护、来源/备份、验证/保留/状态、staging/apply/rollback、legacy 迁移、新 Mac recovery plan/受控安装）均通过最终独立复核，当前无未解决 Critical / High / Medium finding。
 - **为什么现在要改**：1.0 的备份、验证、恢复和调度都依赖同一个仓库身份、认证加密、锁和操作结果契约；基础错误会向所有后续任务扩散。
-- **交付结果**：除 v1 repository/protection 与 declarative verified backup 外，新增 structural/content verify、healthy retention/status、authenticated staging/apply/rollback，以及 strict legacy 0.1.x read/restore 和 copy-only verified v1 migration。
-- **主要影响**：T1-T5 accepted write sets；新 Mac plan、scheduler、root CLI/package/release hardening 仍由 T6-T9 完成。
-- **Reviewer Action**：先看 T4 authenticated intent/lifecycle，再看 apply/rollback preflight、Safety lease、atomic workers 与 metadata identity cutoff；T1-T3 细节见各任务补充。
+- **交付结果**：除 v1 repository/protection 与 declarative verified backup 外，新增 structural/content verify、healthy retention/status、authenticated staging/apply/rollback、strict legacy 0.1.x read/restore、copy-only migration，以及默认零安装的新 Mac recovery plan 与显式 allowlisted installer resume。
+- **主要影响**：T1-T6 accepted write sets；scheduler、root CLI/package 与 release hardening 仍由 T7-T9 完成。
+- **Reviewer Action**：先看 T6 plan approval/installer lease、directory-bound current inventory 与 fidelity consent，再看 T4 apply/rollback Safety lifecycle；T1-T5 细节见各任务补充。
 
 ### 2. 背景与目标
 
@@ -239,6 +239,83 @@ Operations: 0
 Writes: 0
 Deletes: 0
 Validation: Collect pass; Select no candidates; Rank skip; Inspect Evidence pass for current code/tests; Decide no reusable candidate; Validate pass/not-applicable including plan_drift; Apply skipped; Revalidate skipped because zero-write
+Decision: no-reusable-lesson
+```
+
+### 23. T6 新 Mac recovery plan 与受控安装评审补充
+
+#### T6 摘要、边界与结果
+
+- **一句话结论**：T6 经三轮独立对抗复核和 lease/scanner 最终窄修复后通过，最终无 Critical / High / Medium / Low finding。
+- **Before / After**：从无新 Mac 恢复编排，升级为认证 recovery point → isolated staging → 当前/期望 inventory diff → 默认 missing-app/manual report；只有显式审批、显式阶段确认和交互调用才可执行 Homebrew/VS Code allowlist。
+- **Accepted Write Set**：`src/recovery-plan/**`、`src/cli/recover.ts`、`tests/recovery-plan/**`；以及 original-path overlap、apply fidelity consent、byte-oriented recovery credential 所需的最小共享 recovery/protection/repository/CLI 文件与测试（以计划 T6 Ownership 为准）。
+- **非目标**：不 root-wire 命令（T8）；不自动安装 App Store、DMG、Raycast、未知应用；不自动 apply 配置；不创建通用 installer framework。
+
+#### T6 需求—实现—验证映射
+
+| Requirement / Success Criterion | Implementation | Verification | 状态 |
+|---|---|---|---|
+| 默认只恢复配置、应用仅报告 | 全量认证 staging；`software`/manual diff；默认 dry-run，零 installer、零原路径 apply | CLI default/no-process、missing/manual inventory tests | verified |
+| Apple Silicon only | platform/architecture gate 在 repository/inventory I/O 前执行 | non-arm64 pre-I/O test | verified |
+| 受控 allowlisted installer | strict Brewfile/VS Code grammar；重新合成单项 Brewfile；固定绝对 executable；`shell:false` | traversal/directive tests、exact argv/phase tests | verified |
+| 显式审批、dry-run、恢复执行 | exact plan fingerprint、phase confirmation、private bounded journal、pending/failed resume | fingerprint/journal tamper/limit/resume tests | verified |
+| 跨进程唯一执行 | plan-wide authoritative lease；完整 pending dir 原子发布；unique Brewfile | phase/state-dir concurrency、publication race tests | verified |
+| child 生命周期安全 | `idle | launch-pending | running`；spawn 前 durable sentinel；unknown-child wedge 永不 auto-quarantine；running 仅 dead PID + expired 才清 | PID publication failure、unreaped child、expired launch-pending tests | verified |
+| current inventory bounded/no-follow | cwd-bound worker 先验证 dev/ino；nested directory rebinding；parent post-check；plist final held/named identity check | root/nested symlink swap、limit、plist conversion drift tests | verified |
+| partial staging 不伪装成功 | staging issues 进入 plan/apply fingerprint；execute apply 需 exact fidelity consent；post-lock re-auth | partial plan、wrong/missing consent、issue-set drift tests | verified |
+| 独立 recovery credential | byte-oriented import；single-owned bounded buffer；所有可控 secret buffer dispose/wipe | missing/malformed/round-trip/wipe tests | verified |
+| 稳定自动化错误 | 完整 failure schema；malformed/oversized journal → integrity / `INSTALL_JOURNAL_INVALID` | real CLI boundary tests | verified |
+
+#### T6 Findings 闭环与修复结果
+
+| 问题簇 | Severity | 修复证据 | 最终状态 |
+|---|---|---|---|
+| partial staging success laundering / apply bypass | Medium | truthful partial fields、approval fingerprint、exact apply fidelity consent、post-lock issue-set recheck | fixed |
+| staging 与原配置路径重叠 | Medium | requested/canonical 双向 overlap preflight，在任何 staging child 前拒绝 | fixed |
+| manual work/journal bounds/unknown inventory 丢失 | Medium | deterministic manual journal rows/counts；统一 4 MiB/10k limit；bounded unknown manual output | fixed |
+| phase/state-dir lock 绕过、Brewfile race | Medium | repository/point/plan-wide authoritative lease；逐 action exclusive unique Brewfile | fixed |
+| unbounded/竞态 current scans | Medium | bounded cwd-bound no-follow workers；incomplete → unknown；plist conversion 后 full identity recheck | fixed |
+| stale lease 忽略 child、spawn publish gap | High | complete-dir atomic publish；launch-pending 永不自动清；running child PID/expiry 双门禁；active lease 禁止 release | fixed |
+| credential 副本/不可擦除字符串 | Medium | CLI byte import；single-owned read buffer；decoded/recovery payload dispose/wipe | fixed |
+| journal/CLI 分类不稳定 | Medium / Low | sanitized complete schemas；read/parse/phase/oversize failures统一 integrity | fixed |
+| Brew identifier path semantics | Medium | tap/package directive-specific segment grammar；拒绝 `.`, `..`, 重复/首尾 slash、反斜杠 | fixed |
+
+#### T6 自动化、风险与 ReviewerContribution
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Focused | PASS | final recovery-plan 68/68；execute/current 31/31 |
+| Affected regression | PASS | recovery/CLI/protection/safe-read 69/69 |
+| Full regression | PASS | 47 files / 399 tests |
+| Type / Build | PASS | `tsc --noEmit`；`pnpm build` |
+| Lint / Diff | PASS | direct Biome 26 accepted files；`git diff --check` |
+| Independent review | APPROVED | final 0 open Critical / High / Medium / Low |
+
+- **回滚**：revert T6 task commit；保留已生成的 staging、journal 与 manual report 供诊断，不自动删除用户数据。
+- **观测**：稳定 plan/install result 输出 state/category、point/fingerprint、manual/action counts、issues 与 nextAction。
+- **Known limitation**：dead-parent `launch-pending` 无法证明 child 是否启动，因此安全地保持人工 wedge；Mac App Store、DMG、Raycast 与未知应用始终 manual。
+- **Knowledge Impact**：none；结论属于本 recovery-plan/lease contract 的实现特定 hardening，zero-write compound。
+
+| Reviewer | Role | Scope | Findings | Verification | Knowledge Impact |
+|---|---|---|---|---|---|
+| anvil-doer-t6 | implementation | T6 accepted write set | 关闭全部 findings | 68 focused / 399 full | none |
+| anvil-reviewer-t6 | independent adversarial review | plan/inventory/install lease/apply consent/credential/CLI | final APPROVED；0 open C/H/M/L | static final + focused evidence | none |
+| anvil-lead | final arbiter | plan trace、ownership、full regression、compound、task boundary | accepted | full/type/build/Biome/diff | none |
+
+#### T6 CompoundResultV2
+
+```text
+Action: submit
+Mode: apply
+Scope: T6 authenticated new-Mac recovery plan and controlled installers
+Candidates: 0
+Active: 0
+Draft: 0
+Conflicts: 0
+Operations: 0
+Writes: 0
+Deletes: 0
+Validation: Collect pass (review-auto); Select no candidates because no knowledge root exists; Rank skip; Inspect Evidence pass for current MRD/plan/code/tests/review; Decide no reusable candidate; Validate pass/not-applicable including conflicts, sensitive data, links, schema and plan_drift; Apply skipped because zero operations; Revalidate skipped because zero-write
 Decision: no-reusable-lesson
 ```
 

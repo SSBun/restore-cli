@@ -5,6 +5,7 @@ import { ProtectionAuthenticationError, ProtectionError } from '../protection/er
 import { RepositoryError, openRepository } from '../repository/index.js'
 import type { ClassifiedIssue, RepositoryHandle } from '../repository/index.js'
 import { readBoundedRegularFile } from '../repository/io.js'
+import { expandPath } from '../util/path.js'
 import {
   MAX_PROTECTED_BLOB_BYTES,
   MAX_PROTECTED_MANIFEST_BYTES,
@@ -593,7 +594,17 @@ export async function authenticateStaging(
       'STAGING_REPOSITORY_OVERLAP',
       'Authenticated staging overlaps repository state',
     )
-  const staged = await verifyStaging(stagingPath, metadata)
+  let staged: Awaited<ReturnType<typeof verifyStaging>>
+  try {
+    staged = await verifyStaging(stagingPath, metadata)
+  } catch (error) {
+    if (error instanceof RecoveryFailure) throw error
+    throw new RecoveryFailure(
+      'integrity',
+      'STAGING_VERIFICATION_FAILED',
+      'Staging content or metadata no longer matches its authenticated descriptor',
+    )
+  }
   const descriptor = staged.descriptor
   if (
     descriptor.repositoryId !== options.expectedRepositoryId ||
@@ -691,6 +702,32 @@ export async function stageRecovery(options: StageRecoveryOptions): Promise<Reco
         'UNSAFE_STAGING_ROOT',
         'Staging root overlaps the repository or a broad system root',
       )
+    }
+    if (options.rejectOriginalPathOverlap) {
+      const requestedStagingRoot = resolve(options.stagingRoot)
+      for (const source of selected.sources.filter(
+        (candidate) => candidate.recoveryScope !== 'inventory',
+      )) {
+        const declaredPath = resolve(expandPath(source.declaredPath))
+        let canonicalSourcePath = declaredPath
+        try {
+          canonicalSourcePath = await realpath(declaredPath)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        if (
+          pathsOverlap(requestedStagingRoot, declaredPath) ||
+          pathsOverlap(stagingRoot, canonicalSourcePath) ||
+          pathsOverlap(stagingRoot, declaredPath) ||
+          pathsOverlap(requestedStagingRoot, canonicalSourcePath)
+        ) {
+          throw new RecoveryFailure(
+            'destination',
+            'STAGING_ORIGINAL_PATH_OVERLAP',
+            'Staging root overlaps an authenticated original configuration path',
+          )
+        }
+      }
     }
     const stagingRootIdentity = await assertSafeAbsoluteDirectoryChain(stagingRoot)
     stagingPath = join(stagingRoot, stagingId)

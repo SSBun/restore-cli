@@ -1,7 +1,7 @@
 import type { Command } from 'commander'
 import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
-import { applyStaging, rollbackSafetyPoint } from '../recovery/index.js'
+import { APPLY_FIDELITY_CONSENT, applyStaging, rollbackSafetyPoint } from '../recovery/index.js'
 import type {
   ApplyOptions,
   ApplyResult,
@@ -133,6 +133,10 @@ export function registerV1ApplyCommands(
     .option('--overwrite', 'atomically replace conflicting regular files or links')
     .option('--skip', 'explicitly skip conflicting entries')
     .option('--apply-id <id>', 'resume only this bound apply journal')
+    .option(
+      '--accept-staging-fidelity-issues <token>',
+      `required exact execution consent: ${APPLY_FIDELITY_CONSENT}`,
+    )
     .option('--dry-run', 'plan only; this is the default')
     .option('--execute', 'perform the reviewed destructive apply')
     .action(
@@ -145,6 +149,7 @@ export function registerV1ApplyCommands(
         overwrite?: boolean
         skip?: boolean
         applyId?: string
+        acceptStagingFidelityIssues?: string
         dryRun?: boolean
         execute?: boolean
       }) => {
@@ -169,6 +174,9 @@ export function registerV1ApplyCommands(
             conflictPolicy,
             dryRun: dryRun(values),
             ...(values.applyId ? { applyId: values.applyId } : {}),
+            ...(values.acceptStagingFidelityIssues
+              ? { fidelityConsent: values.acceptStagingFidelityIssues }
+              : {}),
           }
           const result = await dependencies.apply(options)
           if (result.issues[0]) dependencies.writeStderr(`apply-v1: ${result.issues[0].code}`)

@@ -113,9 +113,11 @@ describe('v1 recovery CLI contracts', () => {
     const program = new Command().exitOverride()
     const stdout: string[] = []
     const dryRuns: boolean[] = []
+    const fidelityConsents: Array<string | undefined> = []
     registerV1ApplyCommands(program, {
       apply: vi.fn(async (options) => {
         dryRuns.push(options.dryRun ?? true)
+        fidelityConsents.push(options.fidelityConsent)
         return applyResult(options.dryRun ?? true)
       }),
       writeStdout: (value) => stdout.push(value),
@@ -135,9 +137,18 @@ describe('v1 recovery CLI contracts', () => {
       'plugin:source=/target',
     ]
     await program.parseAsync(['node', 'test', 'apply-v1', ...common])
-    await program.parseAsync(['node', 'test', 'apply-v1', ...common, '--execute'])
+    await program.parseAsync([
+      'node',
+      'test',
+      'apply-v1',
+      ...common,
+      '--execute',
+      '--accept-staging-fidelity-issues',
+      'I_ACCEPT_STAGING_FIDELITY_ISSUES',
+    ])
 
     expect(dryRuns).toEqual([true, false])
+    expect(fidelityConsents).toEqual([undefined, 'I_ACCEPT_STAGING_FIDELITY_ISSUES'])
     expect(stdout.map((value) => JSON.parse(value).dryRun)).toEqual([true, false])
   })
 

@@ -59,6 +59,7 @@ import type {
   StagedEntry,
   StagingDescriptor,
 } from './types.js'
+import { APPLY_FIDELITY_CONSENT } from './types.js'
 
 const MAX_JOURNAL_BYTES = 16 * 1024 * 1024
 const EMPTY_COUNTS: RecoveryCounts = {
@@ -238,6 +239,7 @@ async function buildPlan(
   options: ApplyOptions,
   staging: StagingDescriptor,
   manifest: RecoveryPointManifestV1,
+  stagingFidelityIssues: readonly ClassifiedIssue[],
   resumeSafety?: SafetyManifest,
 ): Promise<ApplyPlan> {
   const policy = options.conflictPolicy ?? 'error'
@@ -401,6 +403,7 @@ async function buildPlan(
       pointId: staging.pointId,
       stagingId: staging.stagingId,
       manifestFingerprint: staging.manifestFingerprint,
+      stagingFidelityIssues,
       policy,
       targets: mappings,
       entries: items.map((item) => ({
@@ -1027,6 +1030,55 @@ function failureIssue(error: unknown): ClassifiedIssue {
   return issue('APPLY_FAILED', 'integrity', 'Recovery apply could not be completed safely')
 }
 
+const fidelityConsentInstruction = `Re-run with --accept-staging-fidelity-issues ${APPLY_FIDELITY_CONSENT}`
+
+function stagingFidelityIssues(entries: readonly ClassifiedIssue[]): ClassifiedIssue[] {
+  const canonical = entries
+    .filter((entry) => entry.category === 'partial')
+    .map((entry) => ({
+      code: entry.code,
+      category: entry.category,
+      message: entry.message,
+      ...(entry.nextAction ? { nextAction: entry.nextAction } : {}),
+    }))
+    .sort((left, right) => {
+      const leftValue = JSON.stringify(left)
+      const rightValue = JSON.stringify(right)
+      return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0
+    })
+  return canonical.filter(
+    (entry, index) => index === 0 || JSON.stringify(entry) !== JSON.stringify(canonical[index - 1]),
+  )
+}
+
+function appendUniqueIssues(
+  target: ClassifiedIssue[],
+  additions: readonly ClassifiedIssue[],
+): void {
+  const existing = new Set(
+    target.map((entry) => `${entry.category}\0${entry.code}\0${entry.message}`),
+  )
+  for (const entry of additions) {
+    const key = `${entry.category}\0${entry.code}\0${entry.message}`
+    if (existing.has(key)) continue
+    existing.add(key)
+    target.push(entry)
+  }
+}
+
+function requireStagingFidelityConsent(
+  options: ApplyOptions,
+  fidelityIssues: readonly ClassifiedIssue[],
+): void {
+  if (fidelityIssues.length === 0 || options.fidelityConsent === APPLY_FIDELITY_CONSENT) return
+  throw new ApplyFailure(
+    'cancelled',
+    'APPLY_FIDELITY_CONSENT_REQUIRED',
+    'Authenticated staging reports fidelity issues and requires exact explicit consent',
+    fidelityConsentInstruction,
+  )
+}
+
 export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> {
   const started = safeNow(options.now)
   let plan: ApplyPlan | undefined
@@ -1040,6 +1092,8 @@ export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> 
   try {
     const authenticated = await authenticateStaging(options, options.stagingPath, options.metadata)
     staging = authenticated.descriptor
+    const authenticatedFidelityIssues = stagingFidelityIssues(authenticated.issues)
+    appendUniqueIssues(issues, authenticatedFidelityIssues)
     let resumeSafety: SafetyManifest | undefined
     if (options.applyId && /^apply-[0-9a-f]{32}$/.test(options.applyId)) {
       const derivedSafetyId = `safety-${options.applyId.slice('apply-'.length)}`
@@ -1097,7 +1151,13 @@ export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> 
         }
       }
     }
-    plan = await buildPlan(options, staging, authenticated.manifest, resumeSafety)
+    plan = await buildPlan(
+      options,
+      staging,
+      authenticated.manifest,
+      authenticatedFidelityIssues,
+      resumeSafety,
+    )
     safetyId = plan.safetyId
     if (plan.items.some((item) => item.status === 'conflicted')) {
       throw new ApplyFailure(
@@ -1113,8 +1173,18 @@ export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> 
         )
       return {
         operation: 'apply',
-        state: issues.length ? 'warning' : 'success',
-        category: issues.length ? 'warning' : 'success',
+        state:
+          authenticatedFidelityIssues.length > 0
+            ? 'partial'
+            : issues.length
+              ? 'warning'
+              : 'success',
+        category:
+          authenticatedFidelityIssues.length > 0
+            ? 'partial'
+            : issues.length
+              ? 'warning'
+              : 'success',
         dryRun: true,
         startedAt: started.toISOString(),
         endedAt: safeNow(options.now).toISOString(),
@@ -1129,9 +1199,13 @@ export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> 
         counts: countsFor(plan),
         items: resultItems(plan),
         issues,
-        nextAction: 'Run apply with dryRun=false after reviewing this bound plan',
+        nextAction:
+          authenticatedFidelityIssues.length > 0
+            ? fidelityConsentInstruction
+            : 'Run apply with dryRun=false after reviewing this bound plan',
       }
     }
+    requireStagingFidelityConsent(options, authenticatedFidelityIssues)
     const opened = await openForMutation(options)
     repository = opened.repository
     lock = opened.lock
@@ -1144,6 +1218,16 @@ export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> 
     const rebound = await authenticateStaging(options, options.stagingPath, options.metadata)
     if (JSON.stringify(rebound.descriptor) !== JSON.stringify(staging))
       throw new Error('staging changed after lock')
+    const reboundFidelityIssues = stagingFidelityIssues(rebound.issues)
+    appendUniqueIssues(issues, reboundFidelityIssues)
+    requireStagingFidelityConsent(options, reboundFidelityIssues)
+    if (JSON.stringify(reboundFidelityIssues) !== JSON.stringify(authenticatedFidelityIssues))
+      throw new ApplyFailure(
+        'integrity',
+        'APPLY_FIDELITY_CHANGED',
+        'Authenticated staging fidelity issues changed after the mutation lock was acquired',
+        'Run a new dry-run and review the changed staging fidelity issues',
+      )
     const safetyItems: SafetyCaptureItem[] = plan.items
       .filter((item) => item.status === 'pending')
       .map((item) => ({
@@ -1778,7 +1862,8 @@ export async function applyStaging(options: ApplyOptions): Promise<ApplyResult> 
       counts: plan ? countsFor(plan, journal) : { ...EMPTY_COUNTS },
       items: plan ? resultItems(plan, journal) : [],
       issues: failureIssues,
-      nextAction: 'Resolve the reported issue and retry with the same bound inputs',
+      nextAction:
+        failure.nextAction ?? 'Resolve the reported issue and retry with the same bound inputs',
     }
   } finally {
     if (safetyLease) await closeSafetyLease(safetyLease).catch(() => undefined)

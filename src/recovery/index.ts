@@ -1,4 +1,5 @@
 export { applyStaging, rollbackSafetyPoint } from './apply.js'
+export { APPLY_FIDELITY_CONSENT } from './types.js'
 export {
   captureCurrentMetadata,
   restoreMetadata,
@@ -23,6 +24,7 @@ export {
   readStagingDescriptor,
   stageRecovery,
   verifyStaging,
+  RecoveryFailure,
 } from './stage.js'
 export type {
   ApplyItemResult,

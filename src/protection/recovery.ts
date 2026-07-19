@@ -3,6 +3,8 @@ import { ProtectionAuthenticationError, ProtectionError } from './errors.js'
 import { MasterKey, RecoverySecret } from './secrets.js'
 
 const RECOVERY_SECRET_PREFIX = 'restore-recovery-v1:'
+const RECOVERY_SECRET_PREFIX_BYTES = Buffer.from(RECOVERY_SECRET_PREFIX, 'ascii')
+const RECOVERY_SECRET_ENCODED_BYTES = 43
 const WRAP_FORMAT_VERSION = 1 as const
 const ALGORITHM = 'aes-256-gcm' as const
 const NONCE_LENGTH = 12
@@ -85,15 +87,60 @@ export function exportRecoverySecret(secret: RecoverySecret): string {
 }
 
 export function importRecoverySecret(material: string): RecoverySecret {
-  if (!material.startsWith(RECOVERY_SECRET_PREFIX)) {
+  const bytes = Buffer.from(material, 'utf8')
+  try {
+    return importRecoverySecretBytes(bytes)
+  } finally {
+    bytes.fill(0)
+  }
+}
+
+function base64UrlValue(byte: number): number {
+  if (byte >= 65 && byte <= 90) return byte - 65
+  if (byte >= 97 && byte <= 122) return byte - 97 + 26
+  if (byte >= 48 && byte <= 57) return byte - 48 + 52
+  if (byte === 45) return 62
+  if (byte === 95) return 63
+  return -1
+}
+
+export function importRecoverySecretBytes(material: Uint8Array): RecoverySecret {
+  const bytes = Buffer.from(material.buffer, material.byteOffset, material.byteLength)
+  if (
+    bytes.length !== RECOVERY_SECRET_PREFIX_BYTES.length + RECOVERY_SECRET_ENCODED_BYTES ||
+    !bytes.subarray(0, RECOVERY_SECRET_PREFIX_BYTES.length).equals(RECOVERY_SECRET_PREFIX_BYTES)
+  ) {
     throw new ProtectionAuthenticationError()
   }
-
-  const encoded = material.slice(RECOVERY_SECRET_PREFIX.length)
+  const decoded = Buffer.alloc(32)
+  let accumulator = 0
+  let bits = 0
+  let offset = 0
   try {
-    return new RecoverySecret(decodeExact(encoded, 32))
+    for (const byte of bytes.subarray(RECOVERY_SECRET_PREFIX_BYTES.length)) {
+      const value = base64UrlValue(byte)
+      if (value < 0) throw new ProtectionAuthenticationError()
+      accumulator = (accumulator << 6) | value
+      bits += 6
+      if (bits >= 8) {
+        bits -= 8
+        if (offset >= decoded.length) throw new ProtectionAuthenticationError()
+        decoded[offset] = (accumulator >> bits) & 0xff
+        offset += 1
+        accumulator &= (1 << bits) - 1
+      }
+    }
+    if (offset !== decoded.length || bits !== 2 || accumulator !== 0) {
+      throw new ProtectionAuthenticationError()
+    }
+    return new RecoverySecret(decoded)
   } catch {
     throw new ProtectionAuthenticationError()
+  } finally {
+    decoded.fill(0)
+    accumulator = 0
+    bits = 0
+    offset = 0
   }
 }
 

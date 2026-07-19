@@ -23,6 +23,7 @@ export {
   exportRecoverySecret,
   generateRecoverySecret,
   importRecoverySecret,
+  importRecoverySecretBytes,
   parseWrappedMasterKey,
   unwrapMasterKey,
   wrapMasterKey,

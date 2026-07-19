@@ -18,13 +18,14 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildCapturePlan } from '../../src/catalog/index.js'
 import { createV1RecoveryPoint } from '../../src/engine/v1-backup.js'
 import type { PluginManifest } from '../../src/plugin/types.js'
 import type { CredentialProvider } from '../../src/protection/credentials.js'
 import { MasterKey } from '../../src/protection/secrets.js'
 import {
+  APPLY_FIDELITY_CONSENT,
   applyStaging,
   browseRecoveryPoints,
   isRecoveryPointProtectedBySafety,
@@ -155,6 +156,7 @@ function repositoryOptions(repository: Awaited<ReturnType<typeof fixture>>) {
     expectedRepositoryId: repository.repositoryId,
     expectedProtection: repository.protection,
     metadata: { platform: 'linux' as const },
+    fidelityConsent: APPLY_FIDELITY_CONSENT,
     ...(repository.credentials ? { credentialProvider: repository.credentials } : {}),
   }
 }
@@ -325,6 +327,115 @@ describe('recovery staging', () => {
     expect(retry.state).toBe('partial')
     expect(retry.applyId).toBe(applied.applyId)
     expect(retry.counts.fidelityLoss).toBeGreaterThan(0)
+  })
+
+  it('reports authenticated fidelity issues in dry-run and requires exact consent before Safety', async () => {
+    const repository = await fixture()
+    const staged = await stageRecovery({
+      ...repositoryOptions(repository),
+      stagingRoot: repository.stagingRoot,
+    })
+    const target = join(repository.root, 'fidelity-consent-target')
+    const input = {
+      ...repositoryOptions(repository),
+      fidelityConsent: undefined,
+      stagingPath: staged.stagingPath as string,
+      targets: [{ sourceId: 'settings:config', targetPath: target }],
+      conflictPolicy: 'overwrite' as const,
+    }
+    const reviewed = await applyStaging(input)
+    expect(reviewed).toMatchObject({ state: 'partial', category: 'partial', dryRun: true })
+    expect(reviewed.nextAction).toContain(APPLY_FIDELITY_CONSENT)
+
+    const beforeSafetyPublish = vi.fn()
+    const rejected = await applyStaging({
+      ...input,
+      dryRun: false,
+      fidelityConsent: 'not-the-consent-token',
+      beforeSafetyPublish,
+    })
+    expect(rejected).toMatchObject({ state: 'failure', category: 'cancelled' })
+    expect(rejected.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'APPLY_FIDELITY_CONSENT_REQUIRED' }),
+      ]),
+    )
+    expect(rejected.nextAction).toContain(APPLY_FIDELITY_CONSENT)
+    expect(beforeSafetyPublish).not.toHaveBeenCalled()
+    expect(await lstatIdentity(target)).toBeNull()
+  })
+
+  it('binds the canonical authenticated fidelity issue set into the apply fingerprint', async () => {
+    const repository = await fixture()
+    const staged = await stageRecovery({
+      ...repositoryOptions(repository),
+      stagingRoot: repository.stagingRoot,
+    })
+    const input = {
+      ...repositoryOptions(repository),
+      stagingPath: staged.stagingPath as string,
+      targets: [
+        { sourceId: 'settings:config', targetPath: join(repository.root, 'fingerprint-target') },
+      ],
+    }
+    const portable = await applyStaging(input)
+    const nativeFailure = await applyStaging({
+      ...input,
+      metadata: {
+        platform: 'darwin',
+        commandRunner: async () => {
+          throw new Error('simulated native verification failure')
+        },
+      },
+    })
+    expect(portable.planFingerprint).not.toBe(nativeFailure.planFingerprint)
+    expect(nativeFailure.issues.map((entry) => entry.code)).toContain('FLAGS_VERIFY_FAILED')
+  })
+
+  it('blocks a post-lock authenticated fidelity issue-set change before Safety', async () => {
+    const repository = await fixture()
+    const staged = await stageRecovery({
+      ...repositoryOptions(repository),
+      stagingRoot: repository.stagingRoot,
+    })
+    let verificationCalls = 0
+    const shared = {
+      ...repositoryOptions(repository),
+      stagingPath: staged.stagingPath as string,
+      targets: [
+        { sourceId: 'settings:config', targetPath: join(repository.root, 'changed-issues-target') },
+      ],
+    }
+    await applyStaging({
+      ...shared,
+      metadata: {
+        platform: 'darwin',
+        commandRunner: async () => {
+          verificationCalls += 1
+          return { stdout: Buffer.from('-') }
+        },
+      },
+    })
+    const initialVerificationCalls = verificationCalls
+    verificationCalls = 0
+    const beforeSafetyPublish = vi.fn()
+    const result = await applyStaging({
+      ...shared,
+      dryRun: false,
+      beforeSafetyPublish,
+      metadata: {
+        platform: 'darwin',
+        commandRunner: async () => {
+          verificationCalls += 1
+          if (verificationCalls > initialVerificationCalls)
+            throw new Error('post-lock verification failure')
+          return { stdout: Buffer.from('-') }
+        },
+      },
+    })
+    expect(result).toMatchObject({ state: 'failure', category: 'integrity' })
+    expect(result.issues.map((entry) => entry.code)).toContain('APPLY_FIDELITY_CHANGED')
+    expect(beforeSafetyPublish).not.toHaveBeenCalled()
   })
 
   it('finalizes restrictive nested directory metadata only after its contents', async () => {

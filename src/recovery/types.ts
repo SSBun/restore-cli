@@ -26,6 +26,7 @@ export interface StageRecoveryOptions extends RecoveryRepositoryOptions {
   stagingRoot: string
   allowPartial?: boolean
   partialConsent?: 'I_ACCEPT_PARTIAL_RECOVERY'
+  rejectOriginalPathOverlap?: boolean
   now?: () => Date
   metadata?: MetadataOptions
   beforeEntryPublish?: (entry: ManifestEntryV1, destination: string) => void | Promise<void>
@@ -78,6 +79,8 @@ export interface RecoveryResult {
 
 export type ConflictPolicy = 'error' | 'overwrite' | 'skip'
 
+export const APPLY_FIDELITY_CONSENT = 'I_ACCEPT_STAGING_FIDELITY_ISSUES' as const
+
 export interface ApplyTargetMapping {
   sourceId: string
   targetPath: string
@@ -88,6 +91,7 @@ export interface ApplyOptions extends RecoveryRepositoryOptions {
   targets: ApplyTargetMapping[]
   conflictPolicy?: ConflictPolicy
   dryRun?: boolean
+  fidelityConsent?: string
   applyId?: string
   now?: () => Date
   metadata?: MetadataOptions
