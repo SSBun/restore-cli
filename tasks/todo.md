@@ -1,5 +1,166 @@
 # 项目审计待办
 
+## [修复 iCloud 锁身份误判](todo/fix-icloud-lock-ctime.md)（2026-07-20）
+
+- 状态：已完成
+- 目标：允许同步服务只改变锁文件 `ctime`，同时保留对锁替换和内容篡改的拒绝。
+- 审查报告：[fix-icloud-lock-ctime.md](../reports/adversarial-review/fix-icloud-lock-ctime.md)
+
+## 诊断 iCloud 仓库锁失败（2026-07-20）
+
+### 状态
+
+- [x] 已完成
+
+### 目标
+
+- [x] 判断 `REPOSITORY_LOCKED` 是真实并发备份还是孤儿锁。
+- [x] 定位此前 `LOCK_OWNERSHIP_CHANGED` 与锁未释放的原因，不修改仓库。
+
+### 诊断结果
+
+- 锁记录的备份 PID `76580` 已不存在，当前是孤儿锁，不是活跃备份。
+- 锁创建于 11:08:01；`owner.json` 的 ctime 在 11:08:04 改变，并带有 `com.apple.provenance` xattr。
+- 锁身份检查比较 `ctime`；iCloud/macOS 的异步 provenance 更新因此被判定为锁身份变化。
+- 第一次备份随后拒绝继续并拒绝释放被视为已变化的锁，后续备份因锁目录仍存在而返回 `REPOSITORY_LOCKED`。
+- 当前只读诊断未清除或修改锁文件。
+
+## 改善备份命令的人类可读输出（2026-07-20）
+
+### 状态
+
+- [x] 已完成
+
+### 目标
+
+- [x] `restore-cli backup` 的来源清单按插件分组、缩进并使用颜色区分信息层级。
+- [x] 最终结果清楚突出成功/失败状态、身份信息、计数和问题列表。
+- [x] `--json` 和退出码契约保持不变，不修改备份或锁业务逻辑。
+
+### 计划
+
+- [x] 复用现有 ANSI color helper，在现有格式化层实现最小输出改动。
+- [x] 补来源清单和最终失败结果的最小格式测试。
+- [x] 运行相关测试、typecheck、lint、build 和全量测试。
+- [x] 完成独立对抗审查。
+
+### Review status
+
+- Gate: APPROVED
+- Reviewer: `/root/backup_output_reviewer`
+- Round: 2/3
+- Scope: `src/cli/backup.ts`、`src/cli/backup-format.ts`、`src/util/result.ts` 及对应测试
+- Resolved: R1、R2、R3、R4
+- Unresolved: none
+
+### 验证结果
+
+- 相关测试通过：3 个文件、19 个测试。
+- `pnpm typecheck`、`pnpm lint`、`pnpm build`、`git diff --check` 通过。
+- 沙箱外全量 `pnpm test` 通过：55 个文件、435 个测试。
+- 真实 `backup --dry-run` 已显示彩色分组、缩进和结构化失败结果；未写入仓库。
+
+## 诊断 iCloud 备份目标初始化失败（2026-07-20）
+
+### 状态
+
+- [x] 已完成
+
+### 目标
+
+- [x] 定位 `restore-cli config` 在 iCloud 目录初始化仓库失败的实际原因。
+- [x] 用代码、测试或可复现命令验证原因，不修改业务代码。
+
+### 计划
+
+- [x] 跟踪配置向导到仓库初始化的完整调用链和错误映射。
+- [x] 检查 iCloud 路径特性与仓库目标校验约束。
+- [x] 运行最小复现或相关测试，记录诊断证据。
+
+### 诊断结果
+
+- 当前配置目标是 iCloud Drive 根目录，配置中没有 v1 `repository` 字段。
+- 该目标下已经存在旧版 `RestoreBackup`，包含 `.restore-marker` 和一个旧快照。
+- iCloud 目标只读预检成功，能取得稳定卷 UUID 和可用容量；路径本身不是阻塞点。
+- v1 初始化固定创建 `<destination>/RestoreBackup`，遇到现存同名目录会返回 `REPOSITORY_PATH_OCCUPIED`，拒绝覆盖旧备份。
+- 配置向导用无绑定 `catch` 隐藏了错误码和详细消息，只显示统一初始化失败文案。
+
+### 验证结果
+
+- `pnpm vitest run src/config/wizard.test.ts src/config/wizard-flow.test.ts` 通过：2 个文件、9 个测试。
+- 沙箱外只读 `preflightTarget(..., { intent: 'read' })` 通过，稳定卷标识为有效 `volume:` UUID。
+- 未修改业务代码，未改动或删除现有 iCloud 备份。
+
+## 简化配置流程（2026-07-19）
+
+### 状态
+
+- [x] 已完成
+
+### 目标
+
+- [x] 用户选择备份目标后自动创建明文 v1 仓库并保存仓库 ID。
+- [x] 新用户不再手工运行 `repository init` 或编辑 JSON5。
+- [x] 配置流程明确警告仓库内容未加密，且初始化失败时不写入无效配置。
+
+### 计划
+
+- [x] 对照旧配置向导与当前 v1 仓库约束。
+- [x] 补自动初始化和失败原子性的最小测试。
+- [x] 实现配置向导并同步 README/使用指南。
+- [x] 运行质量门禁和独立对抗审查。
+
+### Review status
+
+- Gate: APPROVED
+- Reviewer: `/root/config_flow_open_reviewer`（替代 Reviewer）
+- Round: 5/OPEN
+- Scope: `src/config/wizard.ts`、`src/config/wizard.test.ts`、`README.md`、`docs/usage-guide.md`
+- Resolved: R1、R2、R3、R4、R5、R6、R7
+- Unresolved: none
+
+### 验证结果
+
+- 配置相关测试通过：3 个文件，12 个测试。
+- `pnpm typecheck`、`pnpm lint`、`pnpm build`、`git diff --check` 通过。
+- 批准后在沙箱外运行 `pnpm test`，退出码为 0。
+
+## README 与使用指南（2026-07-19）
+
+### 状态
+
+- [x] 已完成
+
+### 目标
+
+- [x] README 准确说明安装要求、核心能力、快速开始和安全恢复流程。
+- [x] 新增中文使用指南，覆盖配置、仓库、备份、验证、恢复、调度和自动化。
+- [x] 文档中的命令与当前 CLI 参数一致，链接有效。
+
+### 计划
+
+- [x] 核对 `package.json`、CLI 注册代码和现有 README。
+- [x] 更新 README 并新增使用指南。
+- [x] 验证命令帮助、文档链接和项目质量门禁。
+- [x] 完成独立对抗审查并记录结果。
+
+### Review status
+
+- Gate: APPROVED
+- Reviewer: `/root/config_flow_open_reviewer`（替代 Reviewer，完整复审文档）
+- Round: 5/OPEN
+- Scope: `README.md`、`docs/usage-guide.md`
+- Resolved: R1、R2、R3、R4、R5、R6、R7
+- Unresolved: none
+
+### 验证结果
+
+- `git diff --check` 通过。
+- `pnpm typecheck`、`pnpm lint`、`pnpm build` 通过。
+- `pnpm test` 在沙箱外通过；沙箱内因文件系统身份检查受限而误报 `TARGET_INSPECTION_FAILED`。
+- `node dist/index.js --help`、`apply --help`、`recover --help` 已核对。
+- 开放审查第 5 轮通过，最终 verdict 为 `APPROVED`。
+
 ## 假设
 
 - 本次任务是快速产品/工程审计，不改业务代码。

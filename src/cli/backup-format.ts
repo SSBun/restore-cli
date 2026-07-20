@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import type { CapturePlan, ResolvedSource } from '../catalog/types.js'
 import type { SkippedPath } from '../engine/diff.js'
 import type {
   BackupFileSyncProgress,
@@ -30,6 +31,41 @@ export function formatBackupHeader(destinationName: string, backupRoot: string):
     color.dim(backupRoot),
     '',
   ]
+}
+
+function formatSourceTags(source: ResolvedSource): string {
+  const requirement =
+    source.requirement === 'required'
+      ? color.yellow(source.requirement)
+      : color.dim(source.requirement)
+  const sensitivity =
+    source.sensitivity === 'secret'
+      ? color.red(source.sensitivity)
+      : source.sensitivity === 'private'
+        ? color.yellow(source.sensitivity)
+        : color.dim(source.sensitivity)
+  return `${requirement} ${color.dim('·')} ${sensitivity} ${color.dim(`· ${source.expectedType}`)}`
+}
+
+export function formatCaptureScope(plan: CapturePlan): string[] {
+  const sourcesByPlugin = new Map<string, ResolvedSource[]>()
+  for (const source of plan.sources) {
+    const sources = sourcesByPlugin.get(source.plugin) ?? []
+    sources.push(source)
+    sourcesByPlugin.set(source.plugin, sources)
+  }
+  const lines = [color.bold(`Sources (${plan.sources.length})`)]
+
+  for (const [plugin, sources] of sourcesByPlugin) {
+    lines.push(`  ${color.cyan(plugin)} ${color.dim(`(${sources.length})`)}`)
+    const nameWidth = Math.max(...sources.map((source) => source.name.length))
+    for (const source of sources) {
+      lines.push(`    ${source.name.padEnd(nameWidth)}  ${formatSourceTags(source)}`)
+      lines.push(`      ${color.dim(shortenPath(source.path))}`)
+    }
+  }
+
+  return lines
 }
 
 export function formatPluginTable(rows: PluginBackupRow[]): string[] {

@@ -108,6 +108,7 @@ async function readLockMetadata(metadataPath: string): Promise<RepositoryLockMet
 }
 
 function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+  // Sync providers may change ctime when attaching xattrs without replacing or editing the file.
   return (
     left.isFile() &&
     right.isFile() &&
@@ -116,8 +117,7 @@ function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
     left.mode === right.mode &&
     left.size === right.size &&
     left.nlink === right.nlink &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
+    left.mtimeNs === right.mtimeNs
   )
 }
 

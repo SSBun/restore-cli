@@ -1,4 +1,5 @@
 import type { Command } from 'commander'
+import { color } from './color.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -32,7 +33,34 @@ export function commandUsesJson(command: Command): boolean {
 
 function identityLine(label: string, value: unknown): string[] {
   const resolved = text(value)
-  return resolved ? [`${label}: ${resolved}`] : []
+  return resolved ? [`  ${color.dim(label.padEnd(18))}${resolved}`] : []
+}
+
+function humanizeLabel(value: string): string {
+  const words = value
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let amount = value
+  let unit = -1
+  do {
+    amount /= 1024
+    unit += 1
+  } while (amount >= 1024 && unit < units.length - 1)
+  return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${units[unit]}`
+}
+
+function countValue(name: string, value: string | number): string {
+  if (typeof value === 'string') return value
+  return name.startsWith('bytes')
+    ? formatBytes(value)
+    : new Intl.NumberFormat('en-US').format(value)
 }
 
 function formatCounts(value: unknown): string[] {
@@ -42,18 +70,45 @@ function formatCounts(value: unknown): string[] {
     ([, count]) => typeof count === 'number' || typeof count === 'string',
   )
   if (entries.length === 0) return []
-  return [`Counts: ${entries.map(([name, count]) => `${name}=${String(count)}`).join(', ')}`]
+  const labels = entries.map(([name]) => humanizeLabel(name))
+  const width = Math.max(...labels.map((label) => label.length))
+  return [
+    '',
+    color.bold('Counts'),
+    ...entries.map(
+      ([name, count], index) =>
+        `  ${color.dim(labels[index].padEnd(width + 2))}${countValue(name, count as string | number)}`,
+    ),
+  ]
 }
 
-function formatIssues(value: unknown): string[] {
+function formatIssues(value: unknown, state?: string, primaryCategory?: string): string[] {
   if (!Array.isArray(value)) return []
-  return value.slice(0, 16).flatMap((candidate) => {
+  const visible = value.slice(0, 16)
+  const items = visible.flatMap((candidate) => {
     const issue = object(candidate)
     const code = text(issue?.code)
     if (!code) return []
     const message = text(issue?.message)
-    return [`Issue: ${code}${message ? ` — ${message}` : ''}`]
+    const category = text(issue?.category)
+    const severe = state === 'failure' && category === primaryCategory
+    const icon = severe ? color.red('✗') : color.yellow('!')
+    const heading = severe ? color.red(code) : color.yellow(code)
+    return [
+      `  ${icon} ${heading}${category ? ` ${color.dim(`[${category}]`)}` : ''}`,
+      ...(message ? [`    ${message}`] : []),
+      ...identityLine('Next', issue?.nextAction).map((line) => `  ${line}`),
+    ]
   })
+  const hidden = value.length - visible.length
+  return items.length > 0
+    ? [
+        '',
+        color.bold(`Issues (${value.length})`),
+        ...items,
+        ...(hidden > 0 ? [`  ${color.dim(`... ${hidden} more not shown`)}`] : []),
+      ]
+    : []
 }
 
 function formatSoftware(value: unknown): string[] {
@@ -63,9 +118,9 @@ function formatSoftware(value: unknown): string[] {
     const name = text(item?.name) ?? text(item?.id)
     if (!name) return []
     const status = text(item?.status) ?? text(item?.action) ?? 'review'
-    return [`  ${name}: ${status}`]
+    return [`  ${color.cyan(name)} ${color.dim(status)}`]
   })
-  return items.length > 0 ? ['Software:', ...items] : []
+  return items.length > 0 ? ['', color.bold('Software'), ...items] : []
 }
 
 function formatManualDependencies(value: unknown): string[] {
@@ -76,7 +131,17 @@ function formatManualDependencies(value: unknown): string[] {
     const name = text(item?.name) ?? text(item?.id) ?? text(item?.description)
     return name ? [`  ${name}`] : []
   })
-  return items.length > 0 ? ['Manual steps:', ...items] : []
+  return items.length > 0 ? ['', color.bold('Manual steps'), ...items] : []
+}
+
+function formatHeadline(operation: string | undefined, state: string | undefined): string[] {
+  if (!operation && !state) return []
+  const name = humanizeLabel(operation ?? 'operation')
+  const status = state ?? 'completed'
+  if (status === 'success')
+    return [`${color.green('✓')} ${color.bold(name)} ${color.green(status)}`]
+  if (status === 'failure') return [`${color.red('✗')} ${color.bold(name)} ${color.red(status)}`]
+  return [`${color.yellow('!')} ${color.bold(name)} ${color.yellow(status)}`]
 }
 
 export function formatHumanResult(value: unknown): string {
@@ -86,10 +151,12 @@ export function formatHumanResult(value: unknown): string {
   const recoveryPoint = object(result.recoveryPoint)
   const staging = object(result.staging)
   const scheduler = object(result.scheduler)
+  const operation = text(result.operation)
+  const state = text(result.state)
+  const category = text(result.category)
   const lines = [
-    ...identityLine('Operation', result.operation),
-    ...identityLine('State', result.state),
-    ...identityLine('Category', result.category),
+    ...formatHeadline(operation, state),
+    ...identityLine('Category', category === 'success' ? undefined : category),
     ...identityLine('Repository', result.repositoryId ?? repository?.id),
     ...identityLine(
       'Repository path',
@@ -98,18 +165,20 @@ export function formatHumanResult(value: unknown): string {
     ...identityLine('Recovery point', result.pointId ?? recoveryPoint?.id),
     ...identityLine('Staging', result.stagingPath ?? staging?.path),
   ]
-  if (typeof result.dryRun === 'boolean') lines.push(`Dry run: ${result.dryRun ? 'yes' : 'no'}`)
+  if (typeof result.dryRun === 'boolean') {
+    lines.push(...identityLine('Dry run', result.dryRun ? 'yes' : 'no'))
+  }
   if (typeof result.degraded === 'boolean') {
-    lines.push(`Degraded: ${result.degraded ? 'yes' : 'no'}`)
+    lines.push(...identityLine('Degraded', result.degraded ? 'yes' : 'no'))
   } else if (typeof scheduler?.degraded === 'boolean') {
-    lines.push(`Degraded: ${scheduler.degraded ? 'yes' : 'no'}`)
+    lines.push(...identityLine('Degraded', scheduler.degraded ? 'yes' : 'no'))
   }
   lines.push(...formatCounts(result.counts))
   lines.push(...formatSoftware(result.software))
   lines.push(...formatManualDependencies(result.manualDependencies))
-  lines.push(...formatIssues(result.issues))
+  lines.push(...formatIssues(result.issues, state, category))
   const nextAction = text(result.nextAction)
-  if (nextAction) lines.push(`Next: ${nextAction}`)
+  if (nextAction) lines.push('', color.bold('Next'), `  ${nextAction}`)
   return lines.length > 0 ? lines.join('\n') : 'Operation completed'
 }
 

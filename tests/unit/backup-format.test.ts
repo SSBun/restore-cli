@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatBackupFooter,
+  formatCaptureScope,
   formatChangedPlugins,
   formatChangesList,
   formatPlanSummary,
@@ -14,6 +15,61 @@ import {
 } from '../../src/cli/backup-format.js'
 
 describe('backup-format', () => {
+  it('groups and indents capture sources by plugin', () => {
+    const home = process.env.HOME || '/tmp'
+    const lines = formatCaptureScope({
+      plugins: [],
+      sources: [
+        {
+          id: 'dotfiles:zshrc',
+          plugin: 'dotfiles',
+          name: 'zshrc',
+          declaredPath: '~/.zshrc',
+          path: `${home}/.zshrc`,
+          requirement: 'optional',
+          sensitivity: 'private',
+          expectedType: 'file',
+          recoveryScope: 'exact',
+          includeEmptyDirectories: false,
+        },
+        {
+          id: 'dotfiles:gitconfig',
+          plugin: 'dotfiles',
+          name: 'gitconfig',
+          declaredPath: '~/.gitconfig',
+          path: `${home}/.gitconfig`,
+          requirement: 'required',
+          sensitivity: 'private',
+          expectedType: 'file',
+          recoveryScope: 'exact',
+          includeEmptyDirectories: false,
+        },
+        {
+          id: 'vim:vimrc',
+          plugin: 'vim',
+          name: 'vimrc',
+          declaredPath: '~/.vimrc',
+          path: `${home}/.vimrc`,
+          requirement: 'optional',
+          sensitivity: 'public',
+          expectedType: 'file',
+          recoveryScope: 'exact',
+          includeEmptyDirectories: false,
+        },
+      ],
+    })
+
+    expect(lines[0]).toContain('Sources (3)')
+    expect(lines[1]).toContain('\x1b[36m')
+    expect(lines[1]).toContain('dotfiles')
+    expect(lines[2]).toContain('    zshrc')
+    expect(lines[3]).toContain('      ')
+    expect(lines[3]).toContain('~/.zshrc')
+    expect(lines.filter((line) => line.includes('\x1b[36mdotfiles\x1b[0m'))).toHaveLength(1)
+    expect(lines.filter((line) => line.includes('\x1b[36mvim\x1b[0m'))).toHaveLength(1)
+    expect(lines.join('\n')).toContain('\x1b[33mrequired')
+  })
+
   it('formats plugin table with aligned columns', () => {
     const lines = formatPluginTable([
       { name: 'iterm2', unchanged: 0, updated: 1, new: 0 },

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as waitForRetry } from 'node:timers/promises'
@@ -91,6 +91,28 @@ describe('repository lock', () => {
       code: 'LOCK_OWNERSHIP_CHANGED',
     })
     await expect(lock.release()).rejects.toMatchObject({ code: 'LOCK_OWNERSHIP_CHANGED' })
+    repository.close()
+  })
+
+  it('keeps ownership when only owner metadata ctime changes', async () => {
+    const { repository } = await writableRepository()
+    const lock = await acquireRepositoryLock(repository, 'delegated')
+    const ownerPath = join(repository.layout.repositoryLock, 'owner.json')
+    const before = await lstat(ownerPath, { bigint: true })
+
+    await chmod(ownerPath, 0o400)
+    await chmod(ownerPath, 0o600)
+
+    const after = await lstat(ownerPath, { bigint: true })
+    expect(after.ctimeNs).not.toBe(before.ctimeNs)
+    expect(after.dev).toBe(before.dev)
+    expect(after.size).toBe(before.size)
+    expect(after.nlink).toBe(before.nlink)
+    expect(after.mtimeNs).toBe(before.mtimeNs)
+    expect(after.mode).toBe(before.mode)
+    expect(after.ino).toBe(before.ino)
+    await expect(assertRepositoryLockOwnership(repository, lock)).resolves.toBeUndefined()
+    await expect(lock.release()).resolves.toBeUndefined()
     repository.close()
   })
 

@@ -1,5 +1,4 @@
 import type { Command } from 'commander'
-import { displayCaptureScope } from '../catalog/index.js'
 import { loadConfigStrict, resolveBackupConfiguration } from '../config/loader.js'
 import type { ResolvedBackupConfiguration } from '../config/loader.js'
 import { createV1RecoveryPoint } from '../engine/v1-backup.js'
@@ -8,7 +7,9 @@ import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
 import { createOperationResult } from '../repository/index.js'
 import type { OperationCategory, OperationResult } from '../repository/index.js'
+import { color } from '../util/color.js'
 import { emitCliResult } from '../util/result.js'
+import { formatBackupHeader, formatCaptureScope } from './backup-format.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -90,9 +91,17 @@ export function registerBackupCommand(
         }
         repositoryId = resolved.config.repository.id
         if (resolved.plugins.length === 0) throw new Error('no enabled plugins')
-        for (const line of displayCaptureScope(resolved.plan)) dependencies.writeStderr(line)
+        for (const line of formatBackupHeader(
+          resolved.config.destination.name,
+          resolved.repositoryPath,
+        )) {
+          dependencies.writeStderr(line)
+        }
+        for (const line of formatCaptureScope(resolved.plan)) dependencies.writeStderr(line)
         if (resolved.config.repository.protection === 'plaintext') {
-          dependencies.writeStderr('INSECURE: repository content and metadata are not encrypted')
+          dependencies.writeStderr(
+            `\n${color.yellow('!')} ${color.bold('Plaintext repository')} ${color.dim('— content and metadata are not encrypted')}`,
+          )
         }
 
         phase = 'internal'

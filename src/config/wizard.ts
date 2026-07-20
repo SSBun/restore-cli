@@ -1,21 +1,60 @@
 import { execSync } from 'node:child_process'
+import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
-import { getBuiltinPlugins } from '../plugin/registry.js'
+import { getAllPlugins } from '../plugin/loader.js'
+import { initializeRepository } from '../repository/index.js'
 import { configExists, loadConfig, prunePlaintextSecretAcceptances, writeConfig } from './loader.js'
-import type { Config, Destination } from './types.js'
+import type { Config, Destination, RepositoryConfig } from './types.js'
 
 interface PluginInfo {
   name: string
   description?: string
 }
 
-function getAvailablePlugins(): PluginInfo[] {
-  return getBuiltinPlugins().map((plugin) => ({
-    name: plugin.name,
-    description: plugin.description,
-  }))
+interface PlaintextDestinationDependencies {
+  mkdir: typeof mkdir
+  initialize: typeof initializeRepository
+}
+
+const DEFAULT_PLAINTEXT_DESTINATION_DEPENDENCIES: PlaintextDestinationDependencies = {
+  mkdir,
+  initialize: initializeRepository,
+}
+
+export async function initializePlaintextDestination(
+  path: string,
+  dependencies: PlaintextDestinationDependencies = DEFAULT_PLAINTEXT_DESTINATION_DEPENDENCIES,
+): Promise<RepositoryConfig> {
+  await dependencies.mkdir(path, { recursive: true, mode: 0o700 })
+  const repository = await dependencies.initialize({ targetPath: path, protection: 'plaintext' })
+  return { id: repository.repositoryId, protection: 'plaintext' }
+}
+
+async function configurePlaintextDestination(path: string): Promise<RepositoryConfig | null> {
+  p.log.warn('Backups in this destination are not encrypted.')
+  try {
+    return await initializePlaintextDestination(path)
+  } catch {
+    p.log.error('The backup repository could not be initialized. Configuration was not saved.')
+    return null
+  }
+}
+
+function getAvailablePlugins(allowedSecretPlugins: ReadonlySet<string> | null): PluginInfo[] {
+  return getAllPlugins()
+    .filter(
+      (plugin) =>
+        allowedSecretPlugins === null ||
+        (plugin.sources ?? []).every((source) => source.sensitivity !== 'secret') ||
+        allowedSecretPlugins.has(plugin.name),
+    )
+    .map((plugin) => ({
+      name: plugin.name,
+      description: plugin.description,
+    }))
 }
 
 function browseFolder(promptMsg?: string): string | null {
@@ -122,9 +161,17 @@ async function askBackupSettings(initial?: { interval: number; maxSnapshots: num
   }
 }
 
-async function askPlugins(initial?: string[]): Promise<string[] | null> {
-  const available = getAvailablePlugins()
+async function askPlugins(
+  initial?: string[],
+  allowedSecretPlugins: ReadonlySet<string> | null = new Set(),
+): Promise<string[] | null> {
+  const available = getAvailablePlugins(allowedSecretPlugins)
   if (available.length === 0) return []
+  const availableNames = new Set(available.map((plugin) => plugin.name))
+
+  if (allowedSecretPlugins?.size === 0) {
+    p.log.warn('Plugins containing secrets are unavailable with the default plaintext repository.')
+  }
 
   const result = await p.multiselect<{ value: string; label: string; hint?: string }[], string>({
     message: 'Select plugins (what to back up):',
@@ -134,12 +181,22 @@ async function askPlugins(initial?: string[]): Promise<string[] | null> {
       hint: pl.description,
     })),
     required: false,
-    initialValues: initial,
+    initialValues: initial?.filter((name) => availableNames.has(name)),
   })
   if (isCancel(result)) return null
 
   const selected = result as string[]
   return selected
+}
+
+function retainedSecretPlugins(config: Config): ReadonlySet<string> | null {
+  if (config.repository?.protection === 'encrypted') return null
+  return new Set(config.repository ? config.plugins : [])
+}
+
+function removeSecretPlugins(plugins: string[]): string[] {
+  const available = new Set(getAvailablePlugins(new Set()).map((plugin) => plugin.name))
+  return plugins.filter((plugin) => available.has(plugin))
 }
 
 function saveConfig(
@@ -181,7 +238,9 @@ export async function runWizard(): Promise<void> {
       return
     }
 
-    saveConfig(destination, settings, plugins)
+    const repository = await configurePlaintextDestination(destination.path)
+    if (!repository) return
+    saveConfig(destination, settings, plugins, { repository })
     p.outro('Setup complete! Run `restore-cli backup` to start backing up.')
     return
   }
@@ -224,7 +283,17 @@ export async function runWizard(): Promise<void> {
 
     if (action === 'save-exit') {
       if (dirty) {
-        saveConfig(destination, settings, plugins, config)
+        const destinationChanged = resolve(destination.path) !== resolve(config.destination.path)
+        const createsPlaintextRepository = destinationChanged || !config.repository
+        const repository = createsPlaintextRepository
+          ? await configurePlaintextDestination(destination.path)
+          : config.repository
+        if (!repository) return
+        const savedPlugins = createsPlaintextRepository ? removeSecretPlugins(plugins) : plugins
+        if (savedPlugins.length !== plugins.length) {
+          p.log.warn('Plugins containing secrets were removed from the new plaintext repository.')
+        }
+        saveConfig(destination, settings, savedPlugins, { ...config, repository })
         p.outro('Configuration updated!')
       }
       return
@@ -244,7 +313,9 @@ export async function runWizard(): Promise<void> {
         changed = true
       }
     } else if (action === 'edit-plugins') {
-      const pResult = await askPlugins(plugins)
+      const retainsRepository = resolve(destination.path) === resolve(config.destination.path)
+      const allowedSecrets = retainsRepository ? retainedSecretPlugins(config) : new Set<string>()
+      const pResult = await askPlugins(plugins, allowedSecrets)
       if (pResult !== null) {
         plugins = pResult
         changed = true
@@ -254,7 +325,9 @@ export async function runWizard(): Promise<void> {
       if (!d) continue
       const s = await askBackupSettings()
       if (!s) continue
-      const pResult = await askPlugins()
+      const retainsRepository = resolve(d.path) === resolve(config.destination.path)
+      const allowedSecrets = retainsRepository ? retainedSecretPlugins(config) : new Set<string>()
+      const pResult = await askPlugins(undefined, allowedSecrets)
       if (pResult === null) continue
       destination = d
       settings = s
