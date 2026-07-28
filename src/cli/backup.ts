@@ -7,6 +7,7 @@ import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
 import { createOperationResult } from '../repository/index.js'
 import type { OperationCategory, OperationResult } from '../repository/index.js'
+import { formatBackupNotification, sendLocalNotification } from '../scheduler/notification.js'
 import { color } from '../util/color.js'
 import { emitCliResult } from '../util/result.js'
 import { formatBackupHeader, formatCaptureScope } from './backup-format.js'
@@ -53,6 +54,7 @@ export interface BackupCommandDependencies {
   createRecoveryPoint: typeof createV1RecoveryPoint
   prepare: typeof preparePlugins
   credentialProvider(): CredentialProvider
+  notify(input: { title: string; message: string }): Promise<boolean>
   writeStdout(value: string): void
   writeStderr(value: string): void
   setExitCode(value: number): void
@@ -63,6 +65,7 @@ const DEFAULT_DEPENDENCIES: BackupCommandDependencies = {
   createRecoveryPoint: createV1RecoveryPoint,
   prepare: preparePlugins,
   credentialProvider: () => new MacOsKeychainCredentialProvider(),
+  notify: (input) => sendLocalNotification(input),
   writeStdout: (value) => console.log(value),
   writeStderr: (value) => console.error(value),
   setExitCode: (value) => {
@@ -84,6 +87,7 @@ export function registerBackupCommand(
       const startedAt = new Date().toISOString()
       let phase: 'configuration' | 'internal' = 'configuration'
       let repositoryId: string | undefined
+      let result: OperationResult
       try {
         const resolved = dependencies.resolveConfiguration()
         if (!resolved.config.repository) {
@@ -105,7 +109,7 @@ export function registerBackupCommand(
         }
 
         phase = 'internal'
-        const result = await dependencies.createRecoveryPoint({
+        result = await dependencies.createRecoveryPoint({
           repositoryPath: resolved.repositoryPath,
           expectedRepositoryId: resolved.config.repository.id,
           expectedProtection: resolved.config.repository.protection,
@@ -120,13 +124,14 @@ export function registerBackupCommand(
             ? { beforeCapture: async () => dependencies.prepare(resolved.plugins) }
             : {}),
         })
-        emitCliResult(program, dependencies.writeStdout, result)
-        dependencies.setExitCode(EXIT_CODES[result.category])
       } catch {
-        const result = cliFailure(phase, startedAt, repositoryId)
+        result = cliFailure(phase, startedAt, repositoryId)
         dependencies.writeStderr(`backup: ${result.issues[0]?.code ?? 'BACKUP_SERVICE_FAILED'}`)
-        emitCliResult(program, dependencies.writeStdout, result)
-        dependencies.setExitCode(EXIT_CODES[result.category])
       }
+      if (!options.dryRun) {
+        await dependencies.notify(formatBackupNotification(result, 'Manual')).catch(() => false)
+      }
+      emitCliResult(program, dependencies.writeStdout, result)
+      dependencies.setExitCode(EXIT_CODES[result.category])
     })
 }

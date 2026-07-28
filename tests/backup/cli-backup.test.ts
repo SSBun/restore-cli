@@ -82,10 +82,47 @@ describe('backup CLI result discipline', () => {
     expect(exitCodes).toEqual([10])
   })
 
+  it('notifies after a manual backup completes', async () => {
+    const resolved = resolvedConfiguration()
+    const exitCodes: number[] = []
+    const notify = vi.fn(async () => {
+      throw new Error('notifications unavailable')
+    })
+    const program = new Command()
+    registerBackupCommand(program, {
+      resolveConfiguration: () => resolved,
+      createRecoveryPoint: vi.fn(async () =>
+        createOperationResult({
+          operation: 'backup',
+          state: 'success',
+          category: 'success',
+          repositoryId: resolved.config.repository?.id,
+          startedAt: '2026-07-19T00:00:00.000Z',
+          endedAt: '2026-07-19T00:00:01.000Z',
+          verificationScope: 'content',
+        }),
+      ),
+      prepare: vi.fn(async () => undefined),
+      notify,
+      writeStdout: () => undefined,
+      writeStderr: () => undefined,
+      setExitCode: (value) => exitCodes.push(value),
+    })
+
+    await program.parseAsync(['node', 'restore-cli', 'backup'])
+
+    expect(notify).toHaveBeenCalledWith({
+      title: 'Restore backup complete',
+      message: 'Manual backup completed successfully.',
+    })
+    expect(exitCodes).toEqual([0])
+  })
+
   it('uses one immutable plan and skips prepare in dry-run', async () => {
     const resolved = resolvedConfiguration()
     const stdout: string[] = []
     const prepare = vi.fn()
+    const notify = vi.fn(async () => true)
     const createRecoveryPoint = vi.fn(async (options) => {
       expect(options.plan).toBe(resolved.plan)
       expect(options.beforeCapture).toBeUndefined()
@@ -104,6 +141,7 @@ describe('backup CLI result discipline', () => {
       resolveConfiguration: () => resolved,
       createRecoveryPoint,
       prepare,
+      notify,
       writeStdout: (value) => stdout.push(value),
       writeStderr: () => undefined,
       setExitCode: () => undefined,
@@ -113,6 +151,7 @@ describe('backup CLI result discipline', () => {
 
     expect(createRecoveryPoint).toHaveBeenCalledOnce()
     expect(prepare).not.toHaveBeenCalled()
+    expect(notify).not.toHaveBeenCalled()
     expect(stdout).toHaveLength(1)
     expect(JSON.parse(stdout[0])).toMatchObject({
       state: 'success',

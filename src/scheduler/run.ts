@@ -9,7 +9,7 @@ import type { CredentialProvider } from '../protection/index.js'
 import { createOperationResult } from '../repository/index.js'
 import type { OperationCategory, OperationResult } from '../repository/index.js'
 import { listSchedulerHistory, recordSchedulerRun } from './history.js'
-import { sendLocalNotification } from './notification.js'
+import { formatBackupNotification, sendLocalNotification } from './notification.js'
 import {
   SCHEDULER_DEGRADED_AFTER_MS,
   SCHEDULER_HISTORY_VERSION,
@@ -146,6 +146,7 @@ export async function runScheduledBackup(
   let result: OperationResult
   let latestHealthyAt = latestKnownHealthy(history)
   let confirmedHealthyPointId: string | null = null
+  let backupAttempted = false
 
   try {
     resolved = dependencies.resolveConfiguration()
@@ -170,6 +171,7 @@ export async function runScheduledBackup(
       )
     } else {
       const plugins = resolved.plugins
+      backupAttempted = true
       result = await dependencies.createRecoveryPoint({
         repositoryPath: resolved.repositoryPath,
         expectedRepositoryId: repository.id,
@@ -221,17 +223,17 @@ export async function runScheduledBackup(
   const ended = new Date(result.endedAt)
   const ageMs = latestHealthyAt ? Math.max(0, ended.getTime() - Date.parse(latestHealthyAt)) : null
   const degraded = ageMs === null || ageMs > SCHEDULER_DEGRADED_AFTER_MS
-  const shouldNotify = notificationRequired(result, degraded) || !historyReadable
+  const shouldNotify = backupAttempted || notificationRequired(result, degraded) || !historyReadable
   let notification: SchedulerNotificationState = 'not-required'
   if (shouldNotify) {
     try {
       const code = !historyReadable
         ? 'SCHEDULER_HISTORY_UNAVAILABLE'
-        : (resultIssueCode(result, degraded) ?? 'SCHEDULED_BACKUP_FAILED')
-      notification = (await dependencies.notify({
-        title: 'Restore backup needs attention',
-        message: `Scheduled backup reported ${code}. Run restore-cli status for details.`,
-      }))
+        : (resultIssueCode(result, degraded) ??
+          (result.state === 'success' ? null : 'SCHEDULED_BACKUP_FAILED'))
+      notification = (await dependencies.notify(
+        formatBackupNotification(result, 'Scheduled', code),
+      ))
         ? 'sent'
         : 'failed'
     } catch {

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import type { OperationResult } from '../repository/index.js'
 import type { CommandRunResult, CommandRunner } from './launchd.js'
 
 export const OSASCRIPT_PATH = '/usr/bin/osascript'
@@ -40,6 +41,23 @@ export const runNotificationCommand: CommandRunner = async (executable, args) =>
 export interface NotificationInput {
   title: string
   message: string
+}
+
+export function formatBackupNotification(
+  result: OperationResult,
+  source: 'Manual' | 'Scheduled',
+  issueCode: string | null | undefined = result.issues[0]?.code,
+): NotificationInput {
+  if (!issueCode && result.state === 'success') {
+    return {
+      title: 'Restore backup complete',
+      message: `${source} backup completed successfully.`,
+    }
+  }
+  return {
+    title: 'Restore backup needs attention',
+    message: `${source} backup reported ${issueCode ?? result.state}. Run restore-cli status for details.`,
+  }
 }
 
 export async function sendLocalNotification(

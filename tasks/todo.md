@@ -4,6 +4,12 @@
 
 - 状态：Completed (2026-07-28 14:21)
 
+## [为每次备份显示系统通知](todo/backup-execution-notifications.md)（2026-07-20）
+
+- 状态：已完成
+- 目标：手动与定时实际备份结束后都显示一次 macOS 通知，dry-run 和通知失败不改变备份语义。
+- 审查报告：[backup-execution-notifications.md](../reports/adversarial-review/backup-execution-notifications.md)
+
 ## [修复 iCloud 锁身份误判](todo/fix-icloud-lock-ctime.md)（2026-07-20）
 
 - 状态：已完成

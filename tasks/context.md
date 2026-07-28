@@ -2,6 +2,7 @@
 
 ## 已确认事实
 
+- 手动与定时实际备份结束后都会发送一次 macOS 结果通知；`backup --dry-run` 不通知，通知发送失败不改变备份结果或退出码。
 - 仓库锁身份校验不再比较会被 iCloud 扩展属性更新改变的 `ctime`；仍比较 inode、设备、mode、size、nlink、mtime 和完整锁元数据，锁文件替换仍会被拒绝。
 - `restore-cli backup` 的人类可读输出按插件分组来源、使用 ANSI 颜色与缩进；通用操作结果显示彩色状态、对齐元数据、计数和分级问题，`--json` 序列化保持不变。
 - 配置向导把 v1 仓库固定初始化为 `<destination>/RestoreBackup`；同名目录（包括旧版仓库）已存在时会以 `REPOSITORY_PATH_OCCUPIED` 拒绝接管，但向导目前只显示统一初始化失败文案。

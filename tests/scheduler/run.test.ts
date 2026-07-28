@@ -83,7 +83,7 @@ function credentialProvider(): CredentialProvider {
 }
 
 describe('one-shot scheduled backup', () => {
-  it('runs only the verified v1 backup and records a healthy result without notification', async () => {
+  it('runs the verified v1 backup and records its completion notification', async () => {
     const create = vi.fn<
       Parameters<typeof createV1RecoveryPoint>,
       ReturnType<typeof createV1RecoveryPoint>
@@ -111,7 +111,7 @@ describe('one-shot scheduled backup', () => {
       healthyPublished: true,
       latestHealthyAt: '2026-07-18T00:01:00.000Z',
       degraded: false,
-      notification: 'not-required',
+      notification: 'sent',
     })
     expect(create).toHaveBeenCalledOnce()
     expect(create.mock.calls[0]?.[0]).toMatchObject({
@@ -120,7 +120,10 @@ describe('one-shot scheduled backup', () => {
       expectedProtection: 'encrypted',
     })
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty('heldLock')
-    expect(notify).not.toHaveBeenCalled()
+    expect(notify).toHaveBeenCalledWith({
+      title: 'Restore backup complete',
+      message: 'Scheduled backup completed successfully.',
+    })
     expect(record).toHaveBeenCalledWith(result)
   })
 
