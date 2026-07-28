@@ -2,13 +2,11 @@ import type { Command } from 'commander'
 import { loadConfigStrict } from '../config/loader.js'
 import type { Config } from '../config/types.js'
 import { isDaemonRunning } from '../daemon/lifecycle.js'
-import { getBackupStat } from '../engine/stat.js'
 import { getV1Status } from '../engine/v1-stat.js'
 import type { V1StatusResult } from '../engine/v1-stat.js'
 import { MacOsKeychainCredentialProvider } from '../protection/index.js'
 import type { CredentialProvider } from '../protection/index.js'
 import type { OperationCategory } from '../repository/index.js'
-import { info } from '../util/log.js'
 import { getBackupRoot } from '../util/path.js'
 import { emitCliResult } from '../util/result.js'
 
@@ -27,29 +25,10 @@ const EXIT_CODES: Record<OperationCategory, number> = {
   internal: 20,
 }
 
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = bytes
-  let unitIndex = 0
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex++
-  }
-
-  const digits = unitIndex === 0 ? 0 : 1
-  return `${value.toFixed(digits)} ${units[unitIndex]}`
-}
-
-function formatDate(date: Date | null): string {
-  return date ? date.toISOString() : 'never'
-}
-
 export interface StatusCommandDependencies {
   load(): Config
-  legacyStat: typeof getBackupStat
-  daemonRunning: typeof isDaemonRunning
   status: typeof getV1Status
+  daemonRunning: typeof isDaemonRunning
   credentialProvider(): CredentialProvider
   writeStdout(value: string): void
   writeStderr(value: string): void
@@ -58,9 +37,8 @@ export interface StatusCommandDependencies {
 
 const DEFAULT_DEPENDENCIES: StatusCommandDependencies = {
   load: loadConfigStrict,
-  legacyStat: getBackupStat,
-  daemonRunning: isDaemonRunning,
   status: getV1Status,
+  daemonRunning: isDaemonRunning,
   credentialProvider: () => new MacOsKeychainCredentialProvider(),
   writeStdout: (value) => console.log(value),
   writeStderr: (value) => console.error(value),
@@ -194,63 +172,46 @@ export function registerStatusCommand(
         return
       }
 
-      // 0.1.x compatibility remains human-readable and read-only until migration.
-      const stat = await dependencies.legacyStat(backupRoot)
-      const daemonState =
-        config.daemon.intervalHours === 0
-          ? 'disabled'
-          : dependencies.daemonRunning()
-            ? 'running'
-            : 'stopped'
-
-      if (program.opts<{ json?: boolean }>().json) {
-        const now = new Date().toISOString()
-        emitCliResult(program, dependencies.writeStdout, {
-          operation: 'status',
-          state: 'success',
-          category: 'success',
-          startedAt: now,
-          endedAt: now,
-          repositoryId: null,
-          repositoryLocation: stat.backupRoot,
-          protection: null,
-          target: { state: 'available', capabilities: null },
-          scheduler: {
-            configured: config.daemon.intervalHours > 0,
-            state: daemonState,
-            intervalHours: config.daemon.intervalHours,
-            nextScheduledAt: null,
+      // No repository configured yet — emit a minimal result.
+      const now = new Date().toISOString()
+      const result = {
+        operation: 'status',
+        state: 'warning',
+        category: 'configuration',
+        startedAt,
+        endedAt: now,
+        repositoryId: null,
+        repositoryLocation: backupRoot,
+        protection: null,
+        target: { state: 'unknown', capabilities: null },
+        scheduler: {
+          configured: config.daemon.intervalHours > 0,
+          state: config.daemon.intervalHours === 0 ? 'disabled' : 'unknown',
+          intervalHours: config.daemon.intervalHours,
+          nextScheduledAt: null,
+        },
+        recoveryPoints: {
+          healthy: 0,
+          partial: 0,
+          failed: 0,
+          latestId: null,
+          latestHealthyId: null,
+          latestHealthyAt: null,
+        },
+        rpo: { ageMs: null, degradedAfterMs: 86_400_000, degraded: true },
+        verification: { structural: null, content: null },
+        recentOperations: [],
+        issues: [
+          {
+            code: 'STATUS_REPOSITORY_NOT_INITIALIZED',
+            category: 'configuration',
+            message: 'Repository is not initialized; run restore-cli config to set up',
+            nextAction: 'Run restore-cli config to initialize the repository',
           },
-          recoveryPoints: {
-            healthy: stat.snapshotCount,
-            partial: 0,
-            failed: 0,
-            latestId: stat.lastBackupName,
-            latestHealthyId: stat.lastBackupName,
-            latestHealthyAt: stat.lastBackupAt?.toISOString() ?? null,
-          },
-          rpo: {
-            ageMs: stat.lastBackupAt ? Date.now() - stat.lastBackupAt.getTime() : null,
-            degradedAfterMs: 86_400_000,
-            degraded: !stat.lastBackupAt || Date.now() - stat.lastBackupAt.getTime() > 86_400_000,
-          },
-          verification: { structural: null, content: null },
-          recentOperations: [],
-          issues: [],
-          nextAction: null,
-        })
-        return
+        ],
+        nextAction: 'Run restore-cli config to initialize the repository',
       }
-
-      info(`Destination: ${config.destination.name}`)
-      info(`Backup root: ${stat.backupRoot}`)
-      info(`Daemon: ${daemonState}`)
-      info(`Snapshots: ${stat.snapshotCount}`)
-      info(`Last backup: ${formatDate(stat.lastBackupAt)}`)
-      if (stat.lastBackupName) info(`Last snapshot: ${stat.lastBackupName}`)
-      info(`Latest snapshot size: ${formatBytes(stat.latestSnapshotBytes)}`)
-      info(`Latest snapshot files: ${stat.latestSnapshotFiles}`)
-      info(`Total backup size: ${formatBytes(stat.totalBackupBytes)}`)
-      info(`Total backup files: ${stat.totalBackupFiles}`)
+      emitCliResult(program, dependencies.writeStdout, result)
+      dependencies.setExitCode(EXIT_CODES.configuration)
     })
 }

@@ -103,11 +103,11 @@ function configurationFailure(startedAt: string): VerificationReport {
 }
 
 export function registerVerifyCommand(
-  program: Command,
+  parent: Command,
   overrides: Partial<VerifyCommandDependencies> = {},
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
-  program
+  parent
     .command('verify')
     .description('Verify v1 recovery point structure or protected content')
     .option('--point <id>', 'Verify one immutable recovery point ID')
@@ -149,12 +149,12 @@ export function registerVerifyCommand(
           })
           if (result.issues.length > 0)
             dependencies.writeStderr(`verify: ${result.issues[0]?.code}`)
-          emitCliResult(program, dependencies.writeStdout, result)
+          emitCliResult(parent, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           const result = configurationFailure(startedAt)
           dependencies.writeStderr('verify: VERIFY_CONFIGURATION_INVALID')
-          emitCliResult(program, dependencies.writeStdout, result)
+          emitCliResult(parent, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.configuration)
         }
       },

@@ -11,6 +11,7 @@ import { formatBackupNotification, sendLocalNotification } from '../scheduler/no
 import { color } from '../util/color.js'
 import { emitCliResult } from '../util/result.js'
 import { formatBackupHeader, formatCaptureScope } from './backup-format.js'
+import { registerVerifyCommand } from './verify.js'
 
 const EXIT_CODES: Record<OperationCategory, number> = {
   success: 0,
@@ -78,9 +79,9 @@ export function registerBackupCommand(
   overrides: Partial<BackupCommandDependencies> = {},
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
-  program
+  const backup = program
     .command('backup')
-    .description('Create a verified v1 recovery point')
+    .description('Create a verified v1 recovery point (run "backup verify" to check integrity)')
     .option('--dry-run', 'Resolve and capture the same source plan without repository writes')
     .option('--point-id <id>', 'Explicit stable recovery point ID')
     .action(async (options: { dryRun?: boolean; pointId?: string }) => {
@@ -134,4 +135,6 @@ export function registerBackupCommand(
       emitCliResult(program, dependencies.writeStdout, result)
       dependencies.setExitCode(EXIT_CODES[result.category])
     })
+
+  registerVerifyCommand(backup)
 }

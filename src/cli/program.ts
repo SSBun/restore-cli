@@ -4,21 +4,18 @@ import { configExists as configExistsDefault } from '../config/loader.js'
 import { runWizard as runWizardDefault } from '../config/wizard.js'
 import { setQuiet, setVerbose } from '../util/log.js'
 import { serializeCliResult } from '../util/result.js'
-import { registerV1ApplyCommands } from './apply.js'
 import { registerBackupCommand } from './backup.js'
 import { registerConfigCommand } from './config.js'
 import { registerDaemonCommand } from './daemon.js'
 import { registerDumpCommand } from './dump.js'
 import { registerOpenCommand } from './open.js'
-import { registerMigrateCommand } from './migrate.js'
 import { checkSupportedPlatform } from './platform.js'
 import type { PlatformCheckResult } from './platform.js'
 import { registerRecoverCommand } from './recover.js'
 import { registerRepositoryCommand } from './repository.js'
-import { registerRestoreCommand, registerV1RestoreCommand } from './restore.js'
+import { registerRestoreCommand } from './restore.js'
 import { registerStatusCommand } from './status.js'
 import { registerToolCommand } from './tool.js'
-import { registerVerifyCommand } from './verify.js'
 
 export interface ProgramDependencies {
   platform(): PlatformCheckResult
@@ -61,14 +58,10 @@ export function createProgram(version: string): Command {
   registerConfigCommand(program)
   registerRepositoryCommand(program)
   registerBackupCommand(program)
-  registerVerifyCommand(program)
-  registerV1RestoreCommand(program)
-  registerV1ApplyCommands(program)
-  registerMigrateCommand(program)
+  registerRestoreCommand(program)
   registerRecoverCommand(program)
   registerDaemonCommand(program)
   registerStatusCommand(program)
-  registerRestoreCommand(program)
   registerOpenCommand(program)
   registerDumpCommand(program)
   registerToolCommand(program)
@@ -115,13 +108,10 @@ function violatesNonInteractiveContract(args: readonly string[]): boolean {
   if (!args.includes('--non-interactive')) return false
   const positional = args.filter((argument) => !argument.startsWith('-'))
   const command = positional[0]
-  if (command === 'tool') return true
+  if (command === 'tool') return false // hidden command; always interactive, never blocked
   if (command === 'config') {
     const subcommand = positional[1]
     return subcommand !== 'show' && subcommand !== 'path' && subcommand !== 'validate'
-  }
-  if (command === 'legacy-restore') {
-    return !args.includes('--snapshot') || !args.includes('--dry-run')
   }
   return false
 }

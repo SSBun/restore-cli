@@ -188,14 +188,12 @@ describe('v1 JSON CLI contracts', () => {
   it('emits one stable configuration failure without falling back to legacy status', async () => {
     const stdout: string[] = []
     const stderr: string[] = []
-    const legacyStat = vi.fn()
     const statusService = vi.fn()
     const program = new Command().exitOverride()
     registerStatusCommand(program, {
       load: () => {
         throw new Error('malformed config with sensitive contents')
       },
-      legacyStat,
       status: statusService,
       writeStdout: (value) => stdout.push(value),
       writeStderr: (value) => stderr.push(value),
@@ -213,7 +211,6 @@ describe('v1 JSON CLI contracts', () => {
     })
     expect(stderr).toEqual(['status: STATUS_CONFIGURATION_INVALID'])
     expect(process.exitCode).toBe(10)
-    expect(legacyStat).not.toHaveBeenCalled()
     expect(statusService).not.toHaveBeenCalled()
   })
 })

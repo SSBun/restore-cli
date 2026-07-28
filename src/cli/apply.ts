@@ -118,11 +118,11 @@ function dryRun(values: { execute?: boolean; dryRun?: boolean }): boolean {
 }
 
 export function registerV1ApplyCommands(
-  program: Command,
+  parent: Command,
   overrides: Partial<ApplyV1CommandDependencies> = {},
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
-  program
+  parent
     .command('apply')
     .alias('apply-v1')
     .description('Dry-run or explicitly apply verified v1 staging')
@@ -181,18 +181,18 @@ export function registerV1ApplyCommands(
           }
           const result = await dependencies.apply(options)
           if (result.issues[0]) dependencies.writeStderr(`apply-v1: ${result.issues[0].code}`)
-          emitCliResult(program, dependencies.writeStdout, result)
+          emitCliResult(parent, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           const result = failure('apply', startedAt)
           dependencies.writeStderr('apply-v1: APPLY_CONFIGURATION_INVALID')
-          emitCliResult(program, dependencies.writeStdout, result)
+          emitCliResult(parent, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.configuration)
         }
       },
     )
 
-  program
+  parent
     .command('rollback')
     .alias('rollback-v1')
     .description('Dry-run or explicitly rollback one durable Safety Point')
@@ -227,12 +227,12 @@ export function registerV1ApplyCommands(
           }
           const result = await dependencies.rollback(options)
           if (result.issues[0]) dependencies.writeStderr(`rollback-v1: ${result.issues[0].code}`)
-          emitCliResult(program, dependencies.writeStdout, result)
+          emitCliResult(parent, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES[result.category])
         } catch {
           const result = failure('rollback', startedAt)
           dependencies.writeStderr('rollback-v1: ROLLBACK_CONFIGURATION_INVALID')
-          emitCliResult(program, dependencies.writeStdout, result)
+          emitCliResult(parent, dependencies.writeStdout, result)
           dependencies.setExitCode(EXIT_CODES.configuration)
         }
       },

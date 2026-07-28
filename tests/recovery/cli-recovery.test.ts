@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { describe, expect, it, vi } from 'vitest'
 import { registerV1ApplyCommands } from '../../src/cli/apply.js'
-import { registerV1RestoreCommand } from '../../src/cli/restore.js'
+import { registerRestoreCommand } from '../../src/cli/restore.js'
 import type { ApplyResult, RecoveryResult } from '../../src/recovery/index.js'
 
 const counts = {
@@ -73,7 +73,7 @@ describe('v1 recovery CLI contracts', () => {
     const stderr: string[] = []
     const exits: number[] = []
     const stage = vi.fn(async () => stageResult())
-    registerV1RestoreCommand(program, {
+    registerRestoreCommand(program, {
       stage,
       writeStdout: (value) => stdout.push(value),
       writeStderr: (value) => stderr.push(value),
@@ -192,7 +192,7 @@ describe('v1 recovery CLI contracts', () => {
     const stdout: string[] = []
     const stderr: string[] = []
     const stage = vi.fn(async () => stageResult())
-    registerV1RestoreCommand(program, {
+    registerRestoreCommand(program, {
       stage,
       writeStdout: (value) => stdout.push(value),
       writeStderr: (value) => stderr.push(value),

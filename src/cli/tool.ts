@@ -8,7 +8,7 @@ import { error } from '../util/log.js'
 
 export function registerToolCommand(program: Command): void {
   program
-    .command('tool')
+    .command('tool', { hidden: true })
     .description('Run an interactive plugin tool')
     .action(async () => {
       const plugins = getPluginsWithAvailableTools()
