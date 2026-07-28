@@ -4,15 +4,13 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import * as p from '@clack/prompts'
 import { isCancel } from '@clack/prompts'
+import { buildCapturePlan } from '../catalog/scope.js'
 import { getAllPlugins } from '../plugin/loader.js'
+import type { ResolvedPluginManifest } from '../plugin/types.js'
 import { initializeRepository } from '../repository/index.js'
+import { getBackupRoot } from '../util/path.js'
 import { configExists, loadConfig, prunePlaintextSecretAcceptances, writeConfig } from './loader.js'
 import type { Config, Destination, RepositoryConfig } from './types.js'
-
-interface PluginInfo {
-  name: string
-  description?: string
-}
 
 interface PlaintextDestinationDependencies {
   mkdir: typeof mkdir
@@ -43,18 +41,15 @@ async function configurePlaintextDestination(path: string): Promise<RepositoryCo
   }
 }
 
-function getAvailablePlugins(allowedSecretPlugins: ReadonlySet<string> | null): PluginInfo[] {
-  return getAllPlugins()
-    .filter(
-      (plugin) =>
-        allowedSecretPlugins === null ||
-        (plugin.sources ?? []).every((source) => source.sensitivity !== 'secret') ||
-        allowedSecretPlugins.has(plugin.name),
-    )
-    .map((plugin) => ({
-      name: plugin.name,
-      description: plugin.description,
-    }))
+function getAvailablePlugins(
+  allowedSecretPlugins: ReadonlySet<string> | null,
+): ResolvedPluginManifest[] {
+  return getAllPlugins().filter(
+    (plugin) =>
+      allowedSecretPlugins === null ||
+      plugin.sources.every((source) => source.sensitivity !== 'secret') ||
+      allowedSecretPlugins.has(plugin.name),
+  )
 }
 
 function browseFolder(promptMsg?: string): string | null {
@@ -162,31 +157,49 @@ async function askBackupSettings(initial?: { interval: number; maxSnapshots: num
 }
 
 async function askPlugins(
+  destinationPath: string,
   initial?: string[],
   allowedSecretPlugins: ReadonlySet<string> | null = new Set(),
 ): Promise<string[] | null> {
   const available = getAvailablePlugins(allowedSecretPlugins)
   if (available.length === 0) return []
-  const availableNames = new Set(available.map((plugin) => plugin.name))
+  const byName = new Map(available.map((plugin) => [plugin.name, plugin]))
+  let initialValues = initial?.filter((name) => byName.has(name))
 
   if (allowedSecretPlugins?.size === 0) {
     p.log.warn('Plugins containing secrets are unavailable with the default plaintext repository.')
   }
 
-  const result = await p.multiselect<{ value: string; label: string; hint?: string }[], string>({
-    message: 'Select plugins (what to back up):',
-    options: available.map((pl) => ({
-      value: pl.name,
-      label: pl.name,
-      hint: pl.description,
-    })),
-    required: false,
-    initialValues: initial?.filter((name) => availableNames.has(name)),
-  })
-  if (isCancel(result)) return null
+  while (true) {
+    const result = await p.multiselect<{ value: string; label: string; hint?: string }[], string>({
+      message: 'Select plugins (what to back up):',
+      options: available.map((plugin) => ({
+        value: plugin.name,
+        label: plugin.name,
+        hint: plugin.description,
+      })),
+      required: false,
+      initialValues,
+    })
+    if (isCancel(result)) return null
 
-  const selected = result as string[]
-  return selected
+    const selected = result as string[]
+    try {
+      buildCapturePlan(
+        selected.flatMap((name) => {
+          const plugin = byName.get(name)
+          return plugin ? [plugin] : []
+        }),
+        { forbiddenPaths: [getBackupRoot(destinationPath)] },
+      )
+      return selected
+    } catch (error) {
+      p.log.error(
+        `Invalid plugin selection: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      initialValues = selected
+    }
+  }
 }
 
 function retainedSecretPlugins(config: Config): ReadonlySet<string> | null {
@@ -232,7 +245,7 @@ export async function runWizard(): Promise<void> {
       return
     }
 
-    const plugins = await askPlugins()
+    const plugins = await askPlugins(destination.path)
     if (!plugins) {
       p.cancel('Setup cancelled')
       return
@@ -315,7 +328,7 @@ export async function runWizard(): Promise<void> {
     } else if (action === 'edit-plugins') {
       const retainsRepository = resolve(destination.path) === resolve(config.destination.path)
       const allowedSecrets = retainsRepository ? retainedSecretPlugins(config) : new Set<string>()
-      const pResult = await askPlugins(plugins, allowedSecrets)
+      const pResult = await askPlugins(destination.path, plugins, allowedSecrets)
       if (pResult !== null) {
         plugins = pResult
         changed = true
@@ -327,7 +340,7 @@ export async function runWizard(): Promise<void> {
       if (!s) continue
       const retainsRepository = resolve(d.path) === resolve(config.destination.path)
       const allowedSecrets = retainsRepository ? retainedSecretPlugins(config) : new Set<string>()
-      const pResult = await askPlugins(undefined, allowedSecrets)
+      const pResult = await askPlugins(d.path, undefined, allowedSecrets)
       if (pResult === null) continue
       destination = d
       settings = s

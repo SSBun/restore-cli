@@ -88,17 +88,6 @@ const builtinPlugins: ResolvedPluginManifest[] = [
     ],
   }),
   builtin({
-    name: 'dotfiles',
-    description: 'Shell dotfiles (.zshrc, .bashrc, .gitconfig)',
-    sources: [
-      source('zshrc', '~/.zshrc', { expectedType: 'file' }),
-      source('bashrc', '~/.bashrc', { expectedType: 'file' }),
-      source('bash-profile', '~/.bash_profile', { expectedType: 'file' }),
-      source('gitconfig', '~/.gitconfig', { expectedType: 'file' }),
-      source('gitignore-global', '~/.gitignore_global', { expectedType: 'file' }),
-    ],
-  }),
-  builtin({
     name: 'ssh',
     description: 'SSH config and keys',
     sources: [source('config', '~/.ssh/config', { sensitivity: 'secret', expectedType: 'file' })],
@@ -109,6 +98,16 @@ const builtinPlugins: ResolvedPluginManifest[] = [
     sources: [
       source('configuration', '~/.sops', {
         sensitivity: 'secret',
+        expectedType: 'directory',
+        includeEmptyDirectories: true,
+      }),
+    ],
+  }),
+  builtin({
+    name: 'csl-agent-kit',
+    description: 'CSL Agent Kit configuration files',
+    sources: [
+      source('configuration', '~/.csl-agent-kit', {
         expectedType: 'directory',
         includeEmptyDirectories: true,
       }),

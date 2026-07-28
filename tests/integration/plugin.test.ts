@@ -28,8 +28,9 @@ describe('plugin registry', () => {
     expect(names.length).toBeGreaterThan(0)
     expect(names).toContain('restore-cli')
     expect(names).toContain('vscode')
-    expect(names).toContain('dotfiles')
+    expect(names).not.toContain('dotfiles')
     expect(names).toContain('sops')
+    expect(names).toContain('csl-agent-kit')
     expect(names).toContain('mac-apps')
     expect(names).toContain('homebrew')
     expect(names).toContain('raycast')
@@ -81,6 +82,11 @@ describe('plugin registry', () => {
   it('should return SOPS plugin definition', () => {
     const plugin = getBuiltinPlugin('sops')
     expect(plugin?.paths).toEqual(['~/.sops'])
+  })
+
+  it('should return CSL Agent Kit plugin definition', () => {
+    const plugin = getBuiltinPlugin('csl-agent-kit')
+    expect(plugin?.paths).toEqual(['~/.csl-agent-kit'])
   })
 })
 

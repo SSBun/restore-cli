@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  buildCapturePlan: vi.fn(),
   configExists: vi.fn(),
   initializeRepository: vi.fn(),
   loadConfig: vi.fn(),
+  logError: vi.fn(),
   mkdir: vi.fn(),
   multiselect: vi.fn(),
   select: vi.fn(),
@@ -18,7 +20,7 @@ vi.mock('@clack/prompts', () => ({
   outro: vi.fn(),
   cancel: vi.fn(),
   isCancel: () => false,
-  log: { error: vi.fn(), warn: vi.fn() },
+  log: { error: mocks.logError, warn: vi.fn() },
   multiselect: mocks.multiselect,
   select: mocks.select,
   spinner: () => ({ start: vi.fn(), stop: vi.fn() }),
@@ -29,12 +31,18 @@ vi.mock('../repository/index.js', () => ({
   initializeRepository: mocks.initializeRepository,
 }))
 
+vi.mock('../catalog/scope.js', () => ({
+  buildCapturePlan: mocks.buildCapturePlan,
+}))
+
 vi.mock('../plugin/loader.js', () => ({
   getAllPlugins: () => [
     { name: 'vscode', sources: [{ sensitivity: 'private' }] },
     { name: 'ssh', sources: [{ sensitivity: 'secret' }] },
     { name: 'sops', sources: [{ sensitivity: 'secret' }] },
     { name: 'custom-public', sources: [{ sensitivity: 'public' }] },
+    { name: 'dotfiles', sources: [{ sensitivity: 'private' }] },
+    { name: 'git', sources: [{ sensitivity: 'private' }] },
   ],
 }))
 
@@ -73,8 +81,9 @@ const existingConfig = {
 
 describe('configuration wizard repository flow', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     mocks.mkdir.mockResolvedValue(undefined)
+    mocks.buildCapturePlan.mockReturnValue({ plugins: [], sources: [] })
     mocks.initializeRepository.mockResolvedValue(repository)
     mocks.multiselect.mockResolvedValue(['vscode'])
     mocks.loadConfig.mockReturnValue(existingConfig)
@@ -144,6 +153,23 @@ describe('configuration wizard repository flow', () => {
         repository: { id: newRepository.repositoryId, protection: 'plaintext' },
       }),
     )
+  })
+
+  it('re-prompts after an overlapping plugin selection and saves the corrected selection', async () => {
+    mocks.configExists.mockReturnValue(true)
+    mocks.select.mockResolvedValueOnce('edit-plugins').mockResolvedValueOnce('save-exit')
+    mocks.multiselect.mockResolvedValueOnce(['dotfiles', 'git']).mockResolvedValueOnce(['git'])
+    mocks.buildCapturePlan.mockImplementationOnce(() => {
+      throw new Error('Sources overlap: dotfiles:gitconfig and git:config')
+    })
+
+    await runWizard()
+
+    expect(mocks.multiselect).toHaveBeenCalledTimes(2)
+    expect(mocks.logError).toHaveBeenCalledWith(
+      'Invalid plugin selection: Sources overlap: dotfiles:gitconfig and git:config',
+    )
+    expect(mocks.writeConfig).toHaveBeenCalledWith(expect.objectContaining({ plugins: ['git'] }))
   })
 
   it('preserves secret plugin choices when editing an encrypted configuration', async () => {

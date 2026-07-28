@@ -1,5 +1,9 @@
 # 项目审计待办
 
+## [阻止重叠插件导致配置向导崩溃](todo/prevent-config-plugin-overlap-crash.md)
+
+- 状态：Completed (2026-07-28 14:21)
+
 ## [修复 iCloud 锁身份误判](todo/fix-icloud-lock-ctime.md)（2026-07-20）
 
 - 状态：已完成
