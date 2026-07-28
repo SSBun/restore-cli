@@ -19,6 +19,7 @@ export type {
   SafetyManifest,
 } from './safety.js'
 export {
+  resolvePoint,
   authenticateStaging,
   browseRecoveryPoints,
   readStagingDescriptor,
@@ -37,6 +38,7 @@ export type {
   MetadataOptions,
   RecoveryCounts,
   RecoveryRepositoryOptions,
+  ResolvePointOptions,
   RecoveryResult,
   RecoverySelection,
   RecoverySourceSummary,

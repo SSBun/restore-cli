@@ -20,6 +20,12 @@ export interface RecoveryRepositoryOptions {
   credentialProvider?: CredentialProvider
 }
 
+export interface ResolvePointOptions extends RecoveryRepositoryOptions {
+  pointId?: string
+  allowPartial?: boolean
+  partialConsent?: 'I_ACCEPT_PARTIAL_RECOVERY'
+}
+
 export interface StageRecoveryOptions extends RecoveryRepositoryOptions {
   pointId?: string
   selection?: RecoverySelection

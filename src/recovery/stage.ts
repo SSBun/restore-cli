@@ -44,6 +44,7 @@ import type {
   RecoveryResult,
   RecoverySelection,
   RecoverySourceSummary,
+  ResolvePointOptions,
   StageRecoveryOptions,
   StagedEntry,
   StagingDescriptor,
@@ -302,7 +303,7 @@ async function loadManifest(
   }
 }
 
-async function resolvePoint(options: StageRecoveryOptions): Promise<{
+export async function resolvePoint(options: ResolvePointOptions): Promise<{
   repository: RepositoryHandle
   point: DiscoveredPoint
   manifest: RecoveryPointManifestV1

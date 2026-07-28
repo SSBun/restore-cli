@@ -8,6 +8,7 @@ import { registerV1ApplyCommands } from './apply.js'
 import { registerBackupCommand } from './backup.js'
 import { registerConfigCommand } from './config.js'
 import { registerDaemonCommand } from './daemon.js'
+import { registerDumpCommand } from './dump.js'
 import { registerMigrateCommand } from './migrate.js'
 import { checkSupportedPlatform } from './platform.js'
 import type { PlatformCheckResult } from './platform.js'
@@ -67,6 +68,7 @@ export function createProgram(version: string): Command {
   registerDaemonCommand(program)
   registerStatusCommand(program)
   registerRestoreCommand(program)
+  registerDumpCommand(program)
   registerToolCommand(program)
   return program
 }
