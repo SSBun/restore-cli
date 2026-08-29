@@ -1,6 +1,6 @@
 # 任务索引
 
-- [提交并发布最新镜像版本](tasks/release-latest-mirror-version.md) — In Progress (2026-08-29 08:25)
+- [提交并发布最新镜像版本](tasks/release-latest-mirror-version.md) — Completed (2026-08-29 08:36)
 
 - [将备份改为最新严格镜像](tasks/replace-backup-with-latest-mirror.md) — Completed (2026-08-29 08:23)
 
