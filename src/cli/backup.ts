@@ -1,61 +1,31 @@
 import type { Command } from 'commander'
 import { loadConfigStrict, resolveBackupConfiguration } from '../config/loader.js'
 import type { ResolvedBackupConfiguration } from '../config/loader.js'
-import { createV1RecoveryPoint } from '../engine/v1-backup.js'
+import { MirrorError, synchronizeMirror } from '../mirror/index.js'
 import { preparePlugins } from '../plugin/prepare.js'
-import { MacOsKeychainCredentialProvider } from '../protection/index.js'
-import type { CredentialProvider } from '../protection/index.js'
-import { createOperationResult } from '../repository/index.js'
-import type { OperationCategory, OperationResult } from '../repository/index.js'
-import { formatBackupNotification, sendLocalNotification } from '../scheduler/notification.js'
 import { color } from '../util/color.js'
+import { isQuiet } from '../util/log.js'
+import { createProgressIndicator } from '../util/progress.js'
 import { emitCliResult } from '../util/result.js'
-import { formatBackupHeader, formatCaptureScope } from './backup-format.js'
-import { registerVerifyCommand } from './verify.js'
+import { formatBackupHeader, formatCaptureScope, formatMirrorDiff } from './backup-format.js'
 
-const EXIT_CODES: Record<OperationCategory, number> = {
+const EXIT_CODES = {
   success: 0,
   warning: 2,
-  partial: 3,
   configuration: 10,
-  authentication: 11,
-  lock: 12,
   source: 13,
   destination: 14,
   integrity: 15,
-  unsupported: 16,
-  cancelled: 17,
   internal: 20,
-}
+} as const
 
-function cliFailure(
-  category: 'configuration' | 'internal',
-  startedAt: string,
-  repositoryId?: string,
-): OperationResult {
-  const code =
-    category === 'configuration' ? 'BACKUP_CONFIGURATION_INVALID' : 'BACKUP_SERVICE_FAILED'
-  const message =
-    category === 'configuration'
-      ? 'Backup configuration could not be resolved safely'
-      : 'Backup service did not produce a result'
-  return createOperationResult({
-    operation: 'backup',
-    state: 'failure',
-    category,
-    ...(repositoryId ? { repositoryId } : {}),
-    startedAt,
-    endedAt: new Date().toISOString(),
-    issues: [{ code, category, message }],
-  })
-}
+type BackupCategory = keyof typeof EXIT_CODES
 
 export interface BackupCommandDependencies {
   resolveConfiguration(): ResolvedBackupConfiguration
-  createRecoveryPoint: typeof createV1RecoveryPoint
+  synchronize: typeof synchronizeMirror
   prepare: typeof preparePlugins
-  credentialProvider(): CredentialProvider
-  notify(input: { title: string; message: string }): Promise<boolean>
+  progress(): ReturnType<typeof createProgressIndicator>
   writeStdout(value: string): void
   writeStderr(value: string): void
   setExitCode(value: number): void
@@ -63,10 +33,9 @@ export interface BackupCommandDependencies {
 
 const DEFAULT_DEPENDENCIES: BackupCommandDependencies = {
   resolveConfiguration: () => resolveBackupConfiguration(loadConfigStrict()),
-  createRecoveryPoint: createV1RecoveryPoint,
+  synchronize: synchronizeMirror,
   prepare: preparePlugins,
-  credentialProvider: () => new MacOsKeychainCredentialProvider(),
-  notify: (input) => sendLocalNotification(input),
+  progress: createProgressIndicator,
   writeStdout: (value) => console.log(value),
   writeStderr: (value) => console.error(value),
   setExitCode: (value) => {
@@ -74,67 +43,118 @@ const DEFAULT_DEPENDENCIES: BackupCommandDependencies = {
   },
 }
 
+function failure(error: unknown, startedAt: string) {
+  const known = error instanceof MirrorError ? error : undefined
+  const category: BackupCategory = known?.category ?? 'internal'
+  return {
+    operation: 'backup',
+    state: 'failure',
+    category,
+    startedAt,
+    endedAt: new Date().toISOString(),
+    issues: [
+      {
+        code: known?.code ?? 'BACKUP_FAILED',
+        category,
+        message: known?.message ?? 'Mirror backup failed',
+      },
+    ],
+    nextAction:
+      known?.code === 'LEGACY_REPOSITORY_PRESENT'
+        ? 'Review with --dry-run --replace, then rerun with --replace'
+        : 'Resolve the reported issue and retry',
+  }
+}
+
 export function registerBackupCommand(
   program: Command,
   overrides: Partial<BackupCommandDependencies> = {},
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
-  const backup = program
+  program
     .command('backup')
-    .description('Create a verified v1 recovery point (run "backup verify" to check integrity)')
-    .option('--dry-run', 'Resolve and capture the same source plan without repository writes')
-    .option('--point-id <id>', 'Explicit stable recovery point ID')
-    .action(async (options: { dryRun?: boolean; pointId?: string }) => {
+    .description('Synchronize the latest readable mirror')
+    .option('--dry-run', 'show changes without writing the mirror')
+    .option('--replace', 'replace an existing legacy repository after review')
+    .action(async (options: { dryRun?: boolean; replace?: boolean }) => {
       const startedAt = new Date().toISOString()
-      let phase: 'configuration' | 'internal' = 'configuration'
-      let repositoryId: string | undefined
-      let result: OperationResult
+      let result: Record<string, unknown>
+      let exitCategory: BackupCategory = 'success'
+      let progress: ReturnType<typeof createProgressIndicator> | undefined
       try {
         const resolved = dependencies.resolveConfiguration()
-        if (!resolved.config.repository) {
-          throw new Error('repository configuration missing')
+        if (resolved.plugins.length === 0) {
+          throw new MirrorError('NO_SOURCES_SELECTED', 'configuration', 'No plugins are selected')
         }
-        repositoryId = resolved.config.repository.id
-        if (resolved.plugins.length === 0) throw new Error('no enabled plugins')
-        for (const line of formatBackupHeader(
-          resolved.config.destination.name,
-          resolved.repositoryPath,
-        )) {
-          dependencies.writeStderr(line)
-        }
-        for (const line of formatCaptureScope(resolved.plan)) dependencies.writeStderr(line)
-        if (resolved.config.repository.protection === 'plaintext') {
+        if (!isQuiet()) {
+          for (const line of formatBackupHeader(
+            resolved.config.destination.name,
+            resolved.mirrorPath,
+          )) {
+            dependencies.writeStderr(line)
+          }
+          for (const line of formatCaptureScope(resolved.plan)) dependencies.writeStderr(line)
           dependencies.writeStderr(
-            `\n${color.yellow('!')} ${color.bold('Plaintext repository')} ${color.dim('— content and metadata are not encrypted')}`,
+            `\n${color.yellow('!')} ${color.bold('Readable mirror')} ${color.dim('— files are not encrypted')}`,
           )
         }
 
-        phase = 'internal'
-        result = await dependencies.createRecoveryPoint({
-          repositoryPath: resolved.repositoryPath,
-          expectedRepositoryId: resolved.config.repository.id,
-          expectedProtection: resolved.config.repository.protection,
-          ...(resolved.config.repository.protection === 'encrypted'
-            ? { credentialProvider: dependencies.credentialProvider() }
-            : {}),
+        progress = dependencies.progress()
+        if (!options.dryRun) {
+          progress.start('Preparing generated inventories')
+          await dependencies.prepare(resolved.plugins, {
+            onPrepareStart(pluginName, current, total) {
+              progress?.update(`Preparing plugins · ${current}/${total} ${pluginName}`)
+            },
+          })
+        } else {
+          progress.start('Scanning current sources')
+        }
+        const synchronized = await dependencies.synchronize({
+          root: resolved.mirrorPath,
           plan: resolved.plan,
-          plaintextSecretAcceptances: resolved.config.plaintextSecretAcceptances,
-          ...(options.pointId ? { pointId: options.pointId } : {}),
-          dryRun: Boolean(options.dryRun),
-          ...(!options.dryRun
-            ? { beforeCapture: async () => dependencies.prepare(resolved.plugins) }
-            : {}),
+          dryRun: options.dryRun === true,
+          replaceLegacy: options.replace === true,
+          onPhase: (message) => progress?.update(message),
         })
-      } catch {
-        result = cliFailure(phase, startedAt, repositoryId)
-        dependencies.writeStderr(`backup: ${result.issues[0]?.code ?? 'BACKUP_SERVICE_FAILED'}`)
-      }
-      if (!options.dryRun) {
-        await dependencies.notify(formatBackupNotification(result, 'Manual')).catch(() => false)
+        progress.stop()
+        progress = undefined
+        if (!isQuiet()) {
+          for (const line of formatMirrorDiff(synchronized.diff)) dependencies.writeStderr(line)
+        }
+        const counts = {
+          created: synchronized.diff.filter((entry) => entry.action === 'create').length,
+          modified: synchronized.diff.filter((entry) => entry.action === 'modify').length,
+          deleted: synchronized.diff.filter((entry) => entry.action === 'delete').length,
+          files: synchronized.manifest.entries.filter((entry) => entry.type === 'file').length,
+        }
+        result = {
+          operation: 'backup',
+          state: 'success',
+          category: 'success',
+          startedAt,
+          endedAt: new Date().toISOString(),
+          mirrorPath: resolved.mirrorPath,
+          dryRun: options.dryRun === true,
+          changed: synchronized.changed,
+          wouldChange: synchronized.diff.length > 0 || synchronized.repaired,
+          repaired: synchronized.repaired,
+          legacyRepositoryDetected: synchronized.replacedLegacy,
+          replacedLegacy: synchronized.replacedLegacy && synchronized.changed,
+          counts,
+          issues: [],
+          nextAction:
+            options.dryRun && (synchronized.diff.length > 0 || synchronized.repaired)
+              ? 'Run backup to synchronize these changes'
+              : null,
+        }
+      } catch (error) {
+        progress?.stop()
+        result = failure(error, startedAt)
+        exitCategory = result.category as BackupCategory
+        dependencies.writeStderr(`backup: ${(result.issues as Array<{ code: string }>)[0]?.code}`)
       }
       emitCliResult(program, dependencies.writeStdout, result)
-      dependencies.setExitCode(EXIT_CODES[result.category])
+      dependencies.setExitCode(EXIT_CODES[exitCategory])
     })
-
-  registerVerifyCommand(backup)
 }

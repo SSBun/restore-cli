@@ -1,10 +1,5 @@
-import type {
-  ExpectedEntryType,
-  ResolvedPluginManifest,
-  SourceRequirement,
-  SourceSensitivity,
-} from '../plugin/types.js'
-import type { MetadataFidelityIssue } from './stable-read.js'
+import type { ResolvedPluginManifest } from '../plugin/types.js'
+import type { ExpectedEntryType, SourceRequirement, SourceSensitivity } from '../plugin/types.js'
 
 export interface ResolvedSource {
   id: string
@@ -18,67 +13,10 @@ export interface ResolvedSource {
   recoveryScope: string
   consistencyGroup?: string
   includeEmptyDirectories: boolean
+  exclude: string[]
 }
 
 export interface CapturePlan {
   plugins: ResolvedPluginManifest[]
   sources: ResolvedSource[]
-}
-
-export interface CapturedXattr {
-  name: string
-  value: string
-}
-
-export interface CapturedMetadata {
-  mode: number
-  size: number
-  modifiedAtNs: string
-  createdAtNs?: string
-  xattrs?: CapturedXattr[]
-  flags?: string[]
-}
-
-export type CapturedEntryType = 'file' | 'directory' | 'symlink'
-
-export interface CapturedEntry {
-  id: string
-  sourceId: string
-  relativePath: string
-  type: CapturedEntryType
-  metadata: CapturedMetadata
-  fidelityIssues?: MetadataFidelityIssue[]
-  linkTarget?: string
-  hardlinkTo?: string
-  contentHash?: string
-  content?: Buffer
-  /** Capture-only identity; omitted from the protected manifest. */
-  identity?: {
-    device: string
-    inode: string
-    changedAtNs: string
-    hardlinkCount: string
-  }
-}
-
-export interface CatalogIssue {
-  code: string
-  sourceId: string
-  message: string
-  severity: 'warning' | 'partial' | 'failure'
-}
-
-export interface CapturedSource {
-  source: ResolvedSource
-  status: 'captured' | 'missing' | 'failed' | 'unstable'
-  entryIds: string[]
-  issues: CatalogIssue[]
-}
-
-export interface CaptureResult {
-  sources: CapturedSource[]
-  entries: CapturedEntry[]
-  issues: CatalogIssue[]
-  requiredFailed: boolean
-  consistencyGroupsFailed: string[]
 }

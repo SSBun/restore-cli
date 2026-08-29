@@ -24,6 +24,19 @@ const SourceSchema = z
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
       .optional(),
     includeEmptyDirectories: z.boolean().optional(),
+    exclude: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(4096)
+          .refine(
+            (path) =>
+              !path.startsWith('/') && !path.includes('\\') && !path.split('/').includes('..'),
+          ),
+      )
+      .max(256)
+      .optional(),
   })
   .strict()
 

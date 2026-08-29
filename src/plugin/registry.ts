@@ -17,6 +17,7 @@ function source(
     recoveryScope?: string
     consistencyGroup?: string
     includeEmptyDirectories?: boolean
+    exclude?: string[]
   } = {},
 ): SourceSpec {
   return {
@@ -30,6 +31,7 @@ function source(
     ...(options.includeEmptyDirectories === undefined
       ? {}
       : { includeEmptyDirectories: options.includeEmptyDirectories }),
+    ...(options.exclude ? { exclude: options.exclude } : {}),
   }
 }
 
@@ -74,18 +76,6 @@ const builtinPlugins: ResolvedPluginManifest[] = [
       }),
     ],
     prepare: 'vscode-extensions-list',
-    tools: [
-      {
-        name: 'refresh',
-        description: 'Regenerate the VS Code extensions inventory',
-        script: 'refresh.sh',
-      },
-      {
-        name: 'show',
-        description: 'Print the saved VS Code extensions inventory',
-        script: 'show.sh',
-      },
-    ],
   }),
   builtin({
     name: 'ssh',
@@ -110,6 +100,7 @@ const builtinPlugins: ResolvedPluginManifest[] = [
       source('configuration', '~/.csl-agent-kit', {
         expectedType: 'directory',
         includeEmptyDirectories: true,
+        exclude: ['.DS_Store', 'hooks/.diagnostics', 'hooks/.tab-title'],
       }),
     ],
   }),
@@ -131,13 +122,6 @@ const builtinPlugins: ResolvedPluginManifest[] = [
         expectedType: 'file',
         consistencyGroup: 'git',
       }),
-    ],
-    tools: [
-      {
-        name: 'show-config',
-        description: 'Print ~/.gitconfig to the terminal',
-        script: 'show-config.sh',
-      },
     ],
   }),
   builtin({
@@ -172,18 +156,6 @@ const builtinPlugins: ResolvedPluginManifest[] = [
       }),
     ],
     prepare: 'homebrew-brewfile',
-    tools: [
-      {
-        name: 'refresh',
-        description: 'Regenerate the Homebrew Brewfile inventory',
-        script: 'refresh.sh',
-      },
-      {
-        name: 'show',
-        description: 'Print the saved Homebrew Brewfile',
-        script: 'show.sh',
-      },
-    ],
   }),
   builtin({
     name: 'raycast',
@@ -215,28 +187,6 @@ const builtinPlugins: ResolvedPluginManifest[] = [
       }),
     ],
     prepare: 'mac-apps-inventory',
-    tools: [
-      {
-        name: 'list',
-        description: 'List cataloged Mac apps from the inventory JSON',
-        script: 'list.sh',
-      },
-      {
-        name: 'refresh',
-        description: 'Regenerate the app inventory without running a full backup',
-        script: 'refresh.sh',
-      },
-      {
-        name: 'restore-plan',
-        description: 'Compare this Mac with the inventory and print a manual install plan',
-        script: 'restore-plan.sh',
-      },
-      {
-        name: 'open-inventory',
-        description: 'Reveal mac-apps.json in Finder',
-        script: 'open-inventory.sh',
-      },
-    ],
   }),
 ]
 

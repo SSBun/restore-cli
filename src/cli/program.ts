@@ -6,16 +6,11 @@ import { setQuiet, setVerbose } from '../util/log.js'
 import { serializeCliResult } from '../util/result.js'
 import { registerBackupCommand } from './backup.js'
 import { registerConfigCommand } from './config.js'
-import { registerDaemonCommand } from './daemon.js'
-import { registerDumpCommand } from './dump.js'
 import { registerOpenCommand } from './open.js'
 import { checkSupportedPlatform } from './platform.js'
 import type { PlatformCheckResult } from './platform.js'
-import { registerRecoverCommand } from './recover.js'
-import { registerRepositoryCommand } from './repository.js'
 import { registerRestoreCommand } from './restore.js'
 import { registerStatusCommand } from './status.js'
-import { registerToolCommand } from './tool.js'
 
 export interface ProgramDependencies {
   platform(): PlatformCheckResult
@@ -42,87 +37,39 @@ const DEFAULT_DEPENDENCIES: ProgramDependencies = {
 export function createProgram(version: string): Command {
   const program = new Commander()
     .name('restore-cli')
-    .description('Verified configuration backup and recovery for Apple Silicon Macs')
+    .description('Synchronize and restore one readable copy of selected files')
     .version(version)
     .option('--json', 'emit one machine-readable JSON final result')
-    .option('--non-interactive', 'never prompt; require every risky choice explicitly')
+    .option('--non-interactive', 'never prompt; require destructive choices explicitly')
     .option('--verbose', 'enable debug output on stderr')
     .option('--quiet', 'suppress non-result informational output')
 
-  program.hook('preAction', (thisCommand) => {
-    const options = thisCommand.optsWithGlobals()
+  program.hook('preAction', (command) => {
+    const options = command.optsWithGlobals()
     if (options.verbose) setVerbose(true)
     if (options.quiet) setQuiet(true)
   })
 
   registerConfigCommand(program)
-  registerRepositoryCommand(program)
   registerBackupCommand(program)
-  registerRestoreCommand(program)
-  registerRecoverCommand(program)
-  registerDaemonCommand(program)
   registerStatusCommand(program)
+  registerRestoreCommand(program)
   registerOpenCommand(program)
-  registerDumpCommand(program)
-  registerToolCommand(program)
   return program
 }
 
-function configurationRequiredResult() {
-  return {
-    operation: 'configuration',
-    state: 'failure',
-    category: 'configuration',
-    issues: [
-      {
-        code: 'CONFIGURATION_REQUIRED',
-        category: 'configuration',
-        message: 'Restore configuration is not initialized and prompting is disabled',
-        nextAction: 'Run restore-cli in an interactive terminal to initialize configuration',
-      },
-    ],
-    nextAction: 'Run restore-cli in an interactive terminal to initialize configuration',
-  }
-}
-
-function nonInteractiveResult() {
+function failure(code: string, message: string, nextAction: string) {
   return {
     operation: 'cli',
     state: 'failure',
     category: 'configuration',
-    issues: [
-      {
-        code: 'NON_INTERACTIVE_INPUT_REQUIRED',
-        category: 'configuration',
-        message: 'This invocation requires interactive input and was refused',
-        nextAction:
-          'Provide every required selector and explicit dry-run or use an interactive terminal',
-      },
-    ],
-    nextAction:
-      'Provide every required selector and explicit dry-run or use an interactive terminal',
+    issues: [{ code, category: 'configuration', message, nextAction }],
+    nextAction,
   }
 }
 
-function violatesNonInteractiveContract(args: readonly string[]): boolean {
-  if (!args.includes('--non-interactive')) return false
-  const positional = args.filter((argument) => !argument.startsWith('-'))
-  const command = positional[0]
-  if (command === 'tool') return false // hidden command; always interactive, never blocked
-  if (command === 'config') {
-    const subcommand = positional[1]
-    return subcommand !== 'show' && subcommand !== 'path' && subcommand !== 'validate'
-  }
-  return false
-}
-
-function informationalInvocation(args: readonly string[]): boolean {
-  return (
-    args.includes('--help') ||
-    args.includes('-h') ||
-    args.includes('--version') ||
-    args.includes('-V')
-  )
+function informational(args: readonly string[]): boolean {
+  return args.some((argument) => ['--help', '-h', '--version', '-V'].includes(argument))
 }
 
 export async function runCli(
@@ -133,7 +80,7 @@ export async function runCli(
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
   const args = argv.slice(2)
   const json = args.includes('--json')
-  if (!informationalInvocation(args)) {
+  if (!informational(args)) {
     const platform = dependencies.platform()
     if (platform.state === 'failure') {
       dependencies.writeStderr(
@@ -145,18 +92,14 @@ export async function runCli(
     }
   }
 
-  if (violatesNonInteractiveContract(args)) {
-    const result = nonInteractiveResult()
-    dependencies.writeStderr('cli: NON_INTERACTIVE_INPUT_REQUIRED')
-    dependencies.writeStdout(serializeCliResult(result, json))
-    dependencies.setExitCode(10)
-    return
-  }
-
   const noCommand = args.length === 0 || args.every((argument) => argument.startsWith('-'))
-  if (!dependencies.configExists() && noCommand && !informationalInvocation(args)) {
+  if (!dependencies.configExists() && noCommand && !informational(args)) {
     if (args.includes('--non-interactive') || !dependencies.interactive()) {
-      const result = configurationRequiredResult()
+      const result = failure(
+        'CONFIGURATION_REQUIRED',
+        'Restore configuration is not initialized',
+        'Run restore-cli config in an interactive terminal',
+      )
       dependencies.writeStderr('configuration: CONFIGURATION_REQUIRED')
       dependencies.writeStdout(serializeCliResult(result, json))
       dependencies.setExitCode(10)

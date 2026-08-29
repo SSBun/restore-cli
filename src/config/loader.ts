@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import JSON5 from 'json5'
-import { buildCapturePlan, sourceContractFingerprint } from '../catalog/scope.js'
+import { buildCapturePlan } from '../catalog/scope.js'
 import type { CapturePlan } from '../catalog/types.js'
 import { getAllPlugins, getUserPluginDirectory } from '../plugin/loader.js'
 import type { ResolvedPluginManifest } from '../plugin/types.js'
@@ -17,9 +17,7 @@ export function getConfigPath(): string {
 }
 
 export function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true })
-  }
+  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true })
 }
 
 export function configExists(): boolean {
@@ -29,23 +27,15 @@ export function configExists(): boolean {
 export type ConfigValidationResult = { ok: true; config: Config } | { ok: false; error: string }
 
 function parseConfigFile(): Config {
-  const raw = readFileSync(CONFIG_PATH, 'utf-8')
-  const parsed = JSON5.parse(raw)
-  return ConfigSchema.parse(parsed)
-}
-
-export function validateConfig(
-  config: Config,
-  options: { pluginDirectory?: string; home?: string } = {},
-): Config {
-  return resolveBackupConfiguration(config, options).config
+  const value = JSON5.parse(readFileSync(CONFIG_PATH, 'utf8')) as Record<string, unknown>
+  return ConfigSchema.parse({ destination: value.destination, plugins: value.plugins })
 }
 
 export interface ResolvedBackupConfiguration {
   config: Config
   plugins: ResolvedPluginManifest[]
   plan: CapturePlan
-  repositoryPath: string
+  mirrorPath: string
 }
 
 function freezeResolvedInputs(
@@ -59,11 +49,6 @@ function freezeResolvedInputs(
     Object.freeze(plugin)
   }
   for (const source of plan.sources) Object.freeze(source)
-  for (const plugin of plan.plugins) {
-    Object.freeze(plugin.sources)
-    Object.freeze(plugin.paths)
-    Object.freeze(plugin)
-  }
   Object.freeze(plan.sources)
   Object.freeze(plan.plugins)
   Object.freeze(plan)
@@ -75,118 +60,40 @@ export function resolveBackupConfiguration(
   config: Config,
   options: { pluginDirectory?: string; home?: string } = {},
 ): ResolvedBackupConfiguration {
-  const duplicatePlugin = config.plugins.find(
-    (plugin, index) => config.plugins.indexOf(plugin) !== index,
-  )
-  if (duplicatePlugin) throw new Error(`Plugin is enabled more than once: ${duplicatePlugin}`)
+  const duplicate = config.plugins.find((name, index) => config.plugins.indexOf(name) !== index)
+  if (duplicate) throw new Error(`Plugin is enabled more than once: ${duplicate}`)
 
   const available = getAllPlugins(options.pluginDirectory ?? getUserPluginDirectory(options.home))
   const byName = new Map(available.map((plugin) => [plugin.name, plugin]))
-  const unknown = config.plugins.find((plugin) => !byName.has(plugin))
+  const unknown = config.plugins.find((name) => !byName.has(name))
   if (unknown) throw new Error(`Unknown plugin: ${unknown}`)
-  const plugins = config.plugins.map((plugin) => byName.get(plugin) as ResolvedPluginManifest)
-  const repositoryPath = getBackupRoot(config.destination.path)
-  const plan = buildCapturePlan(plugins, {
-    home: options.home,
-    forbiddenPaths: [repositoryPath],
-  })
-
-  const acceptanceIds = new Set<string>()
-  for (const acceptance of config.plaintextSecretAcceptances ?? []) {
-    const key = `${acceptance.repositoryId}:${acceptance.sourceId}`
-    if (acceptanceIds.has(key)) {
-      throw new Error(`Plaintext secret acceptance is duplicated: ${acceptance.sourceId}`)
-    }
-    acceptanceIds.add(key)
-  }
-
-  if (config.repository?.protection === 'plaintext') {
-    const validAcceptances = new Set(
-      plan.sources
-        .filter((source) => source.sensitivity === 'secret')
-        .map(
-          (source) => `${config.repository?.id}:${source.id}:${sourceContractFingerprint(source)}`,
-        ),
-    )
-    for (const source of plan.sources.filter((source) => source.sensitivity === 'secret')) {
-      const accepted = (config.plaintextSecretAcceptances ?? []).some(
-        (acceptance) =>
-          acceptance.repositoryId === config.repository?.id &&
-          acceptance.sourceId === source.id &&
-          acceptance.sourceContractFingerprint === sourceContractFingerprint(source),
-      )
-      if (!accepted) {
-        throw new Error(
-          `Plaintext repository requires independent acceptance for secret source: ${source.id}`,
-        )
-      }
-    }
-    for (const acceptance of config.plaintextSecretAcceptances ?? []) {
-      if (acceptance.repositoryId !== config.repository.id) continue
-      const key = `${acceptance.repositoryId}:${acceptance.sourceId}:${acceptance.sourceContractFingerprint}`
-      if (!validAcceptances.has(key)) {
-        throw new Error(`Plaintext secret acceptance is stale or orphaned: ${acceptance.sourceId}`)
-      }
-    }
-  }
-  return { config, ...freezeResolvedInputs(plugins, plan), repositoryPath }
+  const plugins = config.plugins.map((name) => byName.get(name) as ResolvedPluginManifest)
+  const mirrorPath = getBackupRoot(config.destination.path)
+  const plan = buildCapturePlan(plugins, { home: options.home, forbiddenPaths: [mirrorPath] })
+  const secret = plan.sources.find((source) => source.sensitivity === 'secret')
+  if (secret) throw new Error(`Readable mirrors do not support secret source: ${secret.id}`)
+  return { config, mirrorPath, ...freezeResolvedInputs(plugins, plan) }
 }
 
-export function prunePlaintextSecretAcceptances(
-  config: Config,
-  options: { pluginDirectory?: string; home?: string } = {},
-): Config {
-  if (config.repository?.protection !== 'plaintext') return config
-  const available = getAllPlugins(options.pluginDirectory ?? getUserPluginDirectory(options.home))
-  const byName = new Map(available.map((plugin) => [plugin.name, plugin]))
-  const plugins = config.plugins.flatMap((name) => {
-    const plugin = byName.get(name)
-    return plugin ? [plugin] : []
-  })
-  const plan = buildCapturePlan(plugins, {
-    home: options.home,
-    forbiddenPaths: [getBackupRoot(config.destination.path)],
-  })
-  const valid = new Set(
-    plan.sources
-      .filter((source) => source.sensitivity === 'secret')
-      .map(
-        (source) => `${config.repository?.id}:${source.id}:${sourceContractFingerprint(source)}`,
-      ),
-  )
-  return {
-    ...config,
-    plaintextSecretAcceptances: (config.plaintextSecretAcceptances ?? []).filter(
-      (acceptance) =>
-        acceptance.repositoryId !== config.repository?.id ||
-        valid.has(
-          `${acceptance.repositoryId}:${acceptance.sourceId}:${acceptance.sourceContractFingerprint}`,
-        ),
-    ),
-  }
+export function validateConfig(config: Config): Config {
+  return resolveBackupConfiguration(config).config
 }
 
 export function validateConfigFile(): ConfigValidationResult {
-  if (!configExists()) {
-    return { ok: false, error: `Config file not found: ${CONFIG_PATH}` }
-  }
-
+  if (!configExists()) return { ok: false, error: `Config file not found: ${CONFIG_PATH}` }
   try {
     return { ok: true, config: validateConfig(parseConfigFile()) }
-  } catch (err) {
-    return { ok: false, error: (err as Error).message }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message }
   }
 }
 
 export function loadConfig(): Config {
-  if (!configExists()) {
-    return getDefaultConfig()
-  }
-
+  if (!configExists()) return getDefaultConfig()
   try {
     return parseConfigFile()
-  } catch (err) {
-    console.error('Failed to load config, using defaults:', (err as Error).message)
+  } catch (error) {
+    console.error('Failed to load config, using defaults:', (error as Error).message)
     return getDefaultConfig()
   }
 }
@@ -198,18 +105,16 @@ export function loadConfigStrict(): Config {
 
 export function writeConfig(config: Config): void {
   ensureConfigDir()
-  const json5 = JSON5.stringify(config, null, 2)
-  writeFileSync(CONFIG_PATH, json5, 'utf-8')
+  writeFileSync(CONFIG_PATH, JSON5.stringify(ConfigSchema.parse(config), null, 2), 'utf8')
 }
 
 export function getDefaultConfig(): Config {
   return ConfigSchema.parse({
     destination: {
-      name: 'icloud',
-      path: resolve(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/restore'),
+      name: 'iCloud',
+      path: resolve(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs'),
       type: 'icloud',
     },
     plugins: [],
-    plaintextSecretAcceptances: [],
   })
 }

@@ -1,210 +1,150 @@
+import * as p from '@clack/prompts'
+import { isCancel } from '@clack/prompts'
 import type { Command } from 'commander'
-import { loadConfig } from '../config/loader.js'
-import { MacOsKeychainCredentialProvider } from '../protection/index.js'
-import type { CredentialProvider } from '../protection/index.js'
-import { stageRecovery } from '../recovery/index.js'
-import type { RecoveryResult, RecoverySelection, StageRecoveryOptions } from '../recovery/index.js'
-import type { OperationCategory } from '../repository/index.js'
-import { color } from '../util/color.js'
-import { info } from '../util/log.js'
-import { getBackupRoot } from '../util/path.js'
+import { loadConfigStrict, resolveBackupConfiguration } from '../config/loader.js'
+import { MirrorError, inspectMirror, restoreMirror } from '../mirror/index.js'
+import { isQuiet } from '../util/log.js'
+import { createProgressIndicator } from '../util/progress.js'
 import { emitCliResult } from '../util/result.js'
-import { registerV1ApplyCommands } from './apply.js'
+import { formatMirrorDiff } from './backup-format.js'
 
-const EXIT_CODES: Record<OperationCategory, number> = {
+const EXIT_CODES = {
   success: 0,
-  warning: 2,
-  partial: 3,
   configuration: 10,
-  authentication: 11,
-  lock: 12,
   source: 13,
   destination: 14,
   integrity: 15,
-  unsupported: 16,
   cancelled: 17,
   internal: 20,
-}
+} as const
 
-export interface RestoreCommandDependencies {
-  stage: typeof stageRecovery
-  credentialProvider(): CredentialProvider
-  interactive(): boolean
-  writeStdout(value: string): void
-  writeStderr(value: string): void
-  setExitCode(value: number): void
-}
+type RestoreCategory = keyof typeof EXIT_CODES
 
-const DEFAULT_DEPENDENCIES: RestoreCommandDependencies = {
-  stage: stageRecovery,
-  credentialProvider: () => new MacOsKeychainCredentialProvider(),
-  interactive: () => process.stdin.isTTY === true && process.stdout.isTTY === true,
-  writeStdout: (value) => console.log(value),
-  writeStderr: (value) => console.error(value),
-  setExitCode: (value) => {
-    process.exitCode = value
-  },
-}
-
-function collect(value: string, previous: string[]): string[] {
-  return [...previous, value]
-}
-
-function failedResult(startedAt: string): RecoveryResult {
+function result(
+  state: 'success' | 'cancelled' | 'failure',
+  category: RestoreCategory,
+  startedAt: string,
+  fields: Record<string, unknown>,
+) {
   return {
-    operation: 'stage-recovery',
-    state: 'failure',
-    category: 'configuration',
+    operation: 'restore',
+    state,
+    category,
     startedAt,
     endedAt: new Date().toISOString(),
-    repositoryId: 'unknown',
-    protection: 'encrypted',
-    pointId: null,
-    stagingId: null,
-    stagingPath: null,
-    partialAccepted: false,
-    selection: { kind: 'all' },
-    plugins: [],
-    sources: [],
-    selectedPaths: [],
-    limitations: ['No original path was modified'],
-    counts: {
-      filesConsidered: 0,
-      restored: 0,
-      unchanged: 0,
-      skipped: 0,
-      conflicted: 0,
-      failed: 0,
-      fidelityLoss: 0,
-      bytesRead: 0,
-      bytesWritten: 0,
-      bytesVerified: 0,
-    },
-    issues: [
-      {
-        code: 'RESTORE_CONFIGURATION_INVALID',
-        category: 'configuration',
-        message: 'Restore arguments are invalid',
-      },
-    ],
-    nextAction: 'Provide an explicit repository identity and staging root',
+    ...fields,
   }
 }
 
-function parseSelection(values: {
-  plugin?: string
-  source: string[]
-  path: string[]
-  acceptPartial?: boolean
-  point?: string
-}): RecoverySelection {
-  const selectors = [
-    Boolean(values.plugin),
-    values.source.length > 0,
-    values.path.length > 0,
-  ].filter(Boolean)
-  if (selectors.length > 1 || (values.acceptPartial && !values.point)) throw new Error('selector')
-  if (values.plugin) return { kind: 'plugin', plugin: values.plugin }
-  if (values.source.length > 0) return { kind: 'sources', sourceIds: values.source }
-  if (values.path.length > 0) {
-    return {
-      kind: 'paths',
-      paths: values.path.map((path) => {
-        const separator = path.indexOf('=')
-        if (separator < 1) throw new Error('path')
-        return { sourceId: path.slice(0, separator), relativePath: path.slice(separator + 1) }
-      }),
-    }
-  }
-  return { kind: 'all' }
-}
-
-export function registerRestoreCommand(
-  program: Command,
-  overrides: Partial<RestoreCommandDependencies> = {},
-): void {
-  const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides }
-  const restore = program
+export function registerRestoreCommand(program: Command): void {
+  program
     .command('restore')
-    .alias('restore-v1')
-    .description('Restore an authenticated v1 recovery point into isolated staging')
-    .option('--repository <path>', 'existing RestoreBackup repository path')
-    .option('--repository-id <id>', 'expected immutable repository ID')
-    .option('--protection <mode>', 'encrypted or plaintext')
-    .option('--staging <path>', 'existing explicit staging root')
-    .option('--point <id>', 'immutable point ID; defaults to latest healthy')
-    .option('--plugin <name>', 'select one declared plugin')
-    .option('--source <id>', 'select a declared source', collect, [])
-    .option('--path <source-id=relative-path>', 'select a declared manifest path', collect, [])
-    .option('--accept-partial', 'dangerously accept an explicitly selected partial point')
-    .option('--dry-run', 'reject staging writes and return a configuration result')
-    .action(
-      async (values: {
-        repository?: string
-        repositoryId?: string
-        protection?: string
-        staging?: string
-        point?: string
-        plugin?: string
-        source: string[]
-        path: string[]
-        acceptPartial?: boolean
-        dryRun?: boolean
-      }) => {
-        const startedAt = new Date().toISOString()
-        try {
-          let repoPath = values.repository
-          let repoId = values.repositoryId
-          let protection = values.protection
-          const stagingRoot = values.staging
-          if (!repoPath || !repoId || !protection) {
-            try {
-              const config = loadConfig()
-              if (config.repository) {
-                repoPath ??= getBackupRoot(config.destination.path)
-                repoId ??= config.repository.id
-                protection ??= config.repository.protection
-              }
-            } catch {
-              // config not available
-            }
-          }
-          if (!repoPath || !repoId || !protection || !stagingRoot || values.dryRun)
-            throw new Error('required')
-          if (protection !== 'encrypted' && protection !== 'plaintext') throw new Error('mode')
-          const selection = parseSelection(values)
-          const options: StageRecoveryOptions = {
-            repositoryPath: repoPath,
-            expectedRepositoryId: repoId,
-            expectedProtection: protection,
-            ...(protection === 'encrypted'
-              ? { credentialProvider: dependencies.credentialProvider() }
-              : {}),
-            stagingRoot,
-            ...(values.point ? { pointId: values.point } : {}),
-            selection,
-            ...(values.acceptPartial
-              ? { allowPartial: true, partialConsent: 'I_ACCEPT_PARTIAL_RECOVERY' as const }
-              : {}),
-          }
-          const result = await dependencies.stage(options)
-          if (result.issues[0]) dependencies.writeStderr(`restore-v1: ${result.issues[0].code}`)
-          if (result.stagingPath) {
-            info(`${color.green('\u2713')} Staged to: ${color.bold(result.stagingPath)}`)
-            info(
-              `${color.dim('Next:')} restore-cli restore apply --staging ${result.stagingPath} --target <source-id>=<path> --execute`,
-            )
-          }
-          emitCliResult(program, dependencies.writeStdout, result)
-          dependencies.setExitCode(EXIT_CODES[result.category])
-        } catch {
-          const result = failedResult(startedAt)
-          dependencies.writeStderr('restore-v1: RESTORE_CONFIGURATION_INVALID')
-          emitCliResult(program, dependencies.writeStdout, result)
-          dependencies.setExitCode(EXIT_CODES.configuration)
+    .description('Compare the mirror with original paths and restore confirmed differences')
+    .option('--dry-run', 'show differences without changing original paths')
+    .option('--execute', 'restore all displayed differences without prompting')
+    .action(async (options: { dryRun?: boolean; execute?: boolean }) => {
+      const startedAt = new Date().toISOString()
+      let output: Record<string, unknown>
+      let category: RestoreCategory = 'success'
+      const progress = createProgressIndicator()
+      try {
+        if (options.dryRun && options.execute) {
+          throw new MirrorError(
+            'CONFLICTING_FLAGS',
+            'configuration',
+            '--dry-run and --execute cannot be combined',
+          )
         }
-      },
-    )
+        const resolved = resolveBackupConfiguration(loadConfigStrict())
+        progress.start('Comparing mirror with original paths')
+        const inspected = await inspectMirror(resolved.mirrorPath, resolved.plan)
+        progress.stop()
+        if (!isQuiet()) {
+          for (const line of formatMirrorDiff(inspected.diff, 'Restore diff')) console.error(line)
+        }
+        if (inspected.diff.length === 0) {
+          output = result('success', 'success', startedAt, {
+            dryRun: options.dryRun === true,
+            executed: false,
+            counts: { created: 0, modified: 0, deleted: 0 },
+            issues: [],
+            nextAction: null,
+          })
+        } else {
+          let execute = options.execute === true
+          const global = program.opts()
+          if (!options.dryRun && !execute) {
+            if (
+              global.json ||
+              global.nonInteractive ||
+              !process.stdin.isTTY ||
+              !process.stdout.isTTY
+            ) {
+              throw new MirrorError(
+                'RESTORE_CONFIRMATION_REQUIRED',
+                'configuration',
+                'Non-interactive restore requires --execute after reviewing --dry-run',
+              )
+            }
+            const confirmed = await p.confirm({
+              message: `Restore all ${inspected.diff.length} differences to their original paths?`,
+              initialValue: false,
+            })
+            if (isCancel(confirmed) || confirmed !== true) {
+              category = 'cancelled'
+              output = result('cancelled', category, startedAt, {
+                dryRun: false,
+                executed: false,
+                counts: { created: 0, modified: 0, deleted: 0 },
+                issues: [],
+                nextAction: 'No original path was changed',
+              })
+              emitCliResult(program, (value) => console.log(value), output)
+              process.exitCode = EXIT_CODES[category]
+              return
+            }
+            execute = true
+          }
 
-  registerV1ApplyCommands(restore)
+          if (execute) {
+            progress.start('Restoring confirmed differences')
+            await restoreMirror(resolved.mirrorPath, resolved.plan, (message) =>
+              progress.update(message),
+            )
+            progress.stop()
+          }
+          const counts = {
+            created: inspected.diff.filter((entry) => entry.action === 'create').length,
+            modified: inspected.diff.filter((entry) => entry.action === 'modify').length,
+            deleted: inspected.diff.filter((entry) => entry.action === 'delete').length,
+          }
+          output = result('success', 'success', startedAt, {
+            dryRun: options.dryRun === true,
+            executed: execute,
+            counts,
+            issues: [],
+            nextAction: options.dryRun ? 'Run restore and confirm the displayed diff' : null,
+          })
+        }
+      } catch (error) {
+        progress.stop()
+        const known = error instanceof MirrorError ? error : undefined
+        category = (known?.category ?? 'internal') as RestoreCategory
+        output = result('failure', category, startedAt, {
+          dryRun: options.dryRun === true,
+          executed: false,
+          issues: [
+            {
+              code: known?.code ?? 'RESTORE_FAILED',
+              category,
+              message: known?.message ?? 'Restore failed',
+            },
+          ],
+          nextAction: 'Resolve the reported issue and retry restore --dry-run',
+        })
+        console.error(`restore: ${(output.issues as Array<{ code: string }>)[0]?.code}`)
+      }
+      emitCliResult(program, (value) => console.log(value), output)
+      process.exitCode = EXIT_CODES[category]
+    })
 }

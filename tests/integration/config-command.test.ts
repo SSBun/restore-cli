@@ -7,8 +7,6 @@ vi.mock('../../src/config/loader.js', () => ({
   loadConfig: () => ({
     destination: { name: 'local', path: '/tmp/restore', type: 'local' },
     plugins: ['vscode'],
-    daemon: { intervalHours: 0 },
-    maxSnapshots: 14,
   }),
   validateConfigFile: vi.fn(() => ({ ok: true })),
 }))
@@ -62,8 +60,9 @@ describe('config command', () => {
       consoleLog.mockRestore()
     }
 
-    expect(output.join('')).toContain('"intervalHours": 0')
+    expect(output.join('')).toContain('"local"')
     expect(output.join('')).toContain('"vscode"')
+    expect(output.join('')).not.toContain('intervalHours')
   })
 
   it('validates the current config', async () => {

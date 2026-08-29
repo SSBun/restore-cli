@@ -1,9 +1,15 @@
 {
   "name": "@ssbun/restore-cli",
-  "version": "1.0.0",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "description": "CLI tool to back up important files to iCloud or other destinations",
+  "version": "2.0.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "description": "CLI tool to synchronize and restore one readable copy of selected files",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.5.0",
   "type": "module",
   "bin": {
     "restore-cli": "dist/index.js"
@@ -24,7 +30,7 @@
     "url": "git+https://github.com/ssbun/restore-cli.git"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -R src/plugin/scripts dist/plugin/scripts && chmod +x dist/index.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/index.js",
     "dev": "tsc -p tsconfig.build.json --watch",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

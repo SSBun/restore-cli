@@ -4,13 +4,6 @@ export type PluginPrepareHook =
   | 'raycast-extensions'
   | 'vscode-extensions-list'
 
-export interface PluginTool {
-  name: string
-  description: string
-  /** Script filename under `src/plugin/scripts/<plugin-name>/`. */
-  script: string
-}
-
 export type SourceRequirement = 'required' | 'optional'
 export type SourceSensitivity = 'public' | 'private' | 'secret'
 export type ExpectedEntryType = 'file' | 'directory' | 'symlink' | 'any'
@@ -24,6 +17,7 @@ export interface SourceSpec {
   recoveryScope: string
   consistencyGroup?: string
   includeEmptyDirectories?: boolean
+  exclude?: string[]
 }
 
 export interface PluginManifest {
@@ -34,7 +28,6 @@ export interface PluginManifest {
   /** Compatibility view used by the 0.1.x reader and built-in prepare hooks. */
   paths: string[]
   prepare?: PluginPrepareHook
-  tools?: PluginTool[]
 }
 
 export interface ResolvedPluginManifest extends PluginManifest {

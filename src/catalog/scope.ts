@@ -176,6 +176,7 @@ export function buildCapturePlan(
         recoveryScope: source.recoveryScope,
         ...(source.consistencyGroup ? { consistencyGroup: source.consistencyGroup } : {}),
         includeEmptyDirectories: source.includeEmptyDirectories ?? false,
+        exclude: [...(source.exclude ?? [])].sort(),
       })
       for (const denied of forbidden) {
         if (
